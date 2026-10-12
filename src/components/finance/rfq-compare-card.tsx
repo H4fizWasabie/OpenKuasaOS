@@ -57,7 +57,7 @@ export function RfqCompareCard({
               <TableHead>Item</TableHead>
               {rfqs.map((r) => (
                 <TableHead key={r.id} className="text-right align-bottom">
-                  <span className="block whitespace-nowrap font-medium text-foreground">{r.supplier_name}</span>
+                  <span className="block whitespace-normal font-medium text-foreground">{r.supplier_name}</span>
                   <span className="block whitespace-nowrap text-xs font-normal">
                     {r.rfq_no} · {RFQ_STATUS_LABELS[r.status]}
                   </span>
@@ -68,7 +68,7 @@ export function RfqCompareCard({
           <TableBody>
             {rows.map((row) => (
               <TableRow key={row.key}>
-                <TableCell className="min-w-48 align-top">
+                <TableCell className="min-w-48 whitespace-normal align-top">
                   <span className="font-medium">{row.description}</span>
                   {row.uom || row.pack_size ? (
                     <span className="block text-xs text-muted-foreground">{[row.uom, row.pack_size].filter(Boolean).join(' · ')}</span>
