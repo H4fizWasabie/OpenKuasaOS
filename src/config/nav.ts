@@ -47,8 +47,26 @@ import {
   Coins,
   type LucideIcon,
 } from 'lucide-react';
+import type { OrgRole } from '@/lib/auth/current-org';
+import { type Capability, canSee } from '@/lib/auth/permissions';
 
-export type NavItem = { label: string; slug: string; icon: LucideIcon };
+/** A live count pill on a nav item, resolved client-side from the nav-badges context. */
+export type NavBadgeKey = 'pendingProposals' | 'unreadAnnouncements' | 'awaitingAcknowledgement';
+
+export type NavItem = {
+  label: string;
+  slug: string;
+  icon: LucideIcon;
+  /** Shown only to someone with this capability. Left out: shown to everyone. */
+  needs?: Capability;
+  /** Shows a live count pill from the nav-badges context (e.g. pending agent proposals). */
+  badge?: NavBadgeKey;
+  /** The word after the count in the pill's accessible label ("3 waiting"). Default `waiting`. */
+  badgeLabel?: string;
+};
+/** The pill's accessible label: the count and a word (`waiting` unless the item says otherwise). */
+export const badgeAriaLabel = (count: number, word: string = 'waiting'): string => `${count} ${word}`;
+
 export type NavSection = { label: string; items: NavItem[] };
 
 export type Product = {
@@ -80,7 +98,7 @@ export const PRODUCTS: Product[] = [
         label: 'Overview',
         items: [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
-          { label: 'AI Agents', slug: 'agents', icon: Bot },
+          { label: 'AI Agents', slug: 'agents', icon: Bot, badge: 'pendingProposals' },
         ],
       },
       {
@@ -93,7 +111,7 @@ export const PRODUCTS: Product[] = [
       {
         label: 'Leads',
         items: [
-          { label: 'Contacts', slug: 'contacts', icon: Users },
+          { label: 'Lead Funnel', slug: 'leads', icon: Users },
           { label: 'Lead Forms', slug: 'lead-forms', icon: ClipboardList },
         ],
       },
@@ -177,10 +195,11 @@ export const PRODUCTS: Product[] = [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
           { label: 'Dashboard', slug: 'dashboard', icon: TrendingUp },
           { label: 'Calendar', slug: 'calendar', icon: Calendar },
-          { label: 'Announcements', slug: 'announcements', icon: Megaphone },
+          { label: 'Announcements', slug: 'announcements', icon: Megaphone, badge: 'unreadAnnouncements', badgeLabel: 'unread' },
           { label: 'My Attendance', slug: 'my-attendance', icon: Clock },
           { label: 'My Goals', slug: 'my-goals', icon: Target },
-          { label: 'My Documents', slug: 'my-documents', icon: FileText },
+          { label: 'My Documents', slug: 'my-documents', icon: FileText, badge: 'awaitingAcknowledgement', badgeLabel: 'awaiting your acknowledgement' },
+          { label: 'My Payslips', slug: 'my-payslips', icon: Receipt },
           { label: 'Records', slug: 'records', icon: Archive },
         ],
       },
@@ -195,15 +214,18 @@ export const PRODUCTS: Product[] = [
       },
       {
         label: 'Management',
-        items: [{ label: 'Employees', slug: 'employees', icon: Users }],
+        items: [
+          { label: 'Employees', slug: 'employees', icon: Users },
+          { label: 'Attendance', slug: 'attendance', icon: ClipboardList, needs: 'approve' },
+        ],
       },
       {
         label: 'Approvals',
         items: [
-          { label: 'Leave', slug: 'approve-leave', icon: CircleCheck },
-          { label: 'Financial Claims', slug: 'approve-claims', icon: CircleCheck },
-          { label: 'Overtime', slug: 'approve-overtime', icon: CircleCheck },
-          { label: 'Time-Off', slug: 'approve-time-off', icon: CircleCheck },
+          { label: 'Leave', slug: 'approve-leave', icon: CircleCheck, needs: 'approve' },
+          { label: 'Financial Claims', slug: 'approve-claims', icon: CircleCheck, needs: 'approve' },
+          { label: 'Overtime', slug: 'approve-overtime', icon: CircleCheck, needs: 'approve' },
+          { label: 'Time-Off', slug: 'approve-time-off', icon: CircleCheck, needs: 'approve' },
           { label: 'Public Holidays', slug: 'public-holidays', icon: Heart },
           { label: 'Letters', slug: 'letters', icon: FileText },
         ],
@@ -219,8 +241,8 @@ export const PRODUCTS: Product[] = [
       {
         label: 'Payroll',
         items: [
-          { label: 'Payroll', slug: 'payroll', icon: Banknote },
-          { label: 'Payment Vouchers', slug: 'payment-vouchers', icon: Receipt },
+          { label: 'Payroll', slug: 'payroll', icon: Banknote, needs: 'approve' },
+          { label: 'Payment Vouchers', slug: 'payment-vouchers', icon: Receipt, needs: 'approve' },
         ],
       },
       {
@@ -233,7 +255,7 @@ export const PRODUCTS: Product[] = [
       },
       {
         label: 'Configuration',
-        items: [{ label: 'Settings', slug: 'settings', icon: Settings }],
+        items: [{ label: 'Settings', slug: 'settings', icon: Settings, needs: 'approve' }],
       },
     ],
   },
@@ -389,4 +411,14 @@ export function findItem(
     if (hit) return hit;
   }
   return undefined;
+}
+
+/**
+ * A product's navigation for one viewer: items they may not use are left out,
+ * and so is a section with nothing left in it. Demo visitors see everything.
+ */
+export function visibleSections(product: Product, viewer: { role: OrgRole; isDemo: boolean }): NavSection[] {
+  return product.sections
+    .map((section) => ({ ...section, items: section.items.filter((item) => canSee(viewer, item.needs)) }))
+    .filter((section) => section.items.length > 0);
 }

@@ -3,10 +3,16 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { getProduct } from '@/config/nav';
+import { isSampleScreen } from '@/config/live-screens';
 import { ProductRail } from './product-rail';
 import { SecondaryNav } from './secondary-nav';
 import { AppTopbar } from './app-topbar';
 import { AssistantFab } from './assistant-fab';
+import {
+  ASSISTANT_FAB_CLEARANCE_REM,
+  showsAssistantFab,
+} from './assistant-fab-layout';
+import { WipBanner } from './wip-banner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -62,7 +68,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               hasSecondary ? () => setMobileNavOpen(true) : undefined
             }
           />
-          <main className="relative flex-1 overflow-auto bg-muted/30">
+          {isSampleScreen(pathname) ? <WipBanner /> : null}
+          <main
+            // Room to scroll the last content clear of the floating button.
+            style={
+              showsAssistantFab(pathname)
+                ? { paddingBottom: `${ASSISTANT_FAB_CLEARANCE_REM}rem` }
+                : undefined
+            }
+            className="relative flex-1 overflow-auto bg-muted/30"
+          >
             {children}
           </main>
         </div>

@@ -4,25 +4,16 @@ import {
   Filter,
   MapPin,
   PieChart,
-  Plus,
-  Search,
   Star,
   Users,
 } from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
-import {
-  BarGroup,
-  DonutStat,
-  Sparkline,
-  type Series,
-  type Slice,
-} from '@/components/charts';
+import { BarGroup, DonutStat, type Series, type Slice } from '@/components/charts';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -39,145 +30,22 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
+import { DeletionNotice } from '@/screens/hire/delete-dialog';
+import { AddToPool, PoolFooter, PoolRowControls, PoolSearch } from '@/screens/hire/pool-actions';
+import { POOL_READ_CAPPED, poolFooter, poolNoMatch, poolSearchText } from '@/lib/hire/pool';
+import { buildPoolModel, type PoolModel } from '@/lib/hire/lists';
+import { LOAD_FAILED, Muted, loadHire, topSlices } from '@/screens/hire/parts';
 
-/* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
+type Candidate = PoolModel['rows'][number];
+type Status = Candidate['status'];
 
-type Status = 'Available' | 'Shortlisted' | 'Passive' | 'Re-engaged';
+const SKILL_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)'];
 
-type Candidate = {
-  name: string;
-  title: string;
-  skills: string[];
-  location: string;
-  source: string;
-  rating: number;
-  status: Status;
-};
-
-/** Total saved candidates in the pool; the table shows a recent sample. */
-const POOL_SIZE = 342;
-
-const CANDIDATES: Candidate[] = [
-  {
-    name: 'Aisyah Rahman',
-    title: 'Software Engineer',
-    skills: ['React', 'Node.js', 'TypeScript'],
-    location: 'Kuala Lumpur',
-    source: 'LinkedIn',
-    rating: 4.8,
-    status: 'Shortlisted',
-  },
-  {
-    name: 'Faiz Hakim',
-    title: 'Sales Executive',
-    skills: ['B2B Sales', 'CRM'],
-    location: 'Petaling Jaya',
-    source: 'JobStreet',
-    rating: 4.2,
-    status: 'Available',
-  },
-  {
-    name: 'Nurul Huda',
-    title: 'Account Manager',
-    skills: ['Key Accounts', 'Negotiation'],
-    location: 'Shah Alam',
-    source: 'Referral',
-    rating: 4.5,
-    status: 'Available',
-  },
-  {
-    name: 'Ahmad Zaki',
-    title: 'Operations Executive',
-    skills: ['Logistics', 'Excel', 'Vendor Mgmt'],
-    location: 'Klang',
-    source: 'JobStreet',
-    rating: 3.9,
-    status: 'Passive',
-  },
-  {
-    name: 'Rajesh Kumar',
-    title: 'Software Engineer',
-    skills: ['Go', 'Kubernetes', 'AWS'],
-    location: 'Cyberjaya',
-    source: 'LinkedIn',
-    rating: 4.6,
-    status: 'Shortlisted',
-  },
-  {
-    name: 'Mei Ling Tan',
-    title: 'Account Manager',
-    skills: ['SaaS', 'Renewals'],
-    location: 'George Town',
-    source: 'Careers page',
-    rating: 4.1,
-    status: 'Re-engaged',
-  },
-  {
-    name: 'Siti Khadijah',
-    title: 'Sales Executive',
-    skills: ['Inside Sales', 'CRM'],
-    location: 'Subang Jaya',
-    source: 'JobStreet',
-    rating: 3.7,
-    status: 'Passive',
-  },
-  {
-    name: 'Danial Iskandar',
-    title: 'Operations Executive',
-    skills: ['Supply Chain', 'Power BI'],
-    location: 'Seremban',
-    source: 'Agency',
-    rating: 4.0,
-    status: 'Available',
-  },
-  {
-    name: 'Wan Azlan',
-    title: 'Software Engineer',
-    skills: ['Vue', 'PostgreSQL'],
-    location: 'Puchong',
-    source: 'Referral',
-    rating: 4.3,
-    status: 'Re-engaged',
-  },
-  {
-    name: 'Kavitha Subramaniam',
-    title: 'Sales Executive',
-    skills: ['Field Sales', 'Pipeline'],
-    location: 'Johor Bahru',
-    source: 'LinkedIn',
-    rating: 4.4,
-    status: 'Available',
-  },
-];
-
-/* KPI sparkline trends ------------------------------------------------ */
-const SPARK_POOL = [268, 284, 297, 309, 318, 329, 336, 342];
-const SPARK_SHORTLISTED = [31, 34, 37, 39, 42, 44, 46, 48];
-const SPARK_PASSIVE = [142, 151, 158, 164, 170, 177, 182, 186];
-const SPARK_REENGAGED = [9, 11, 13, 15, 17, 19, 21, 23];
-
-/* Talent by skill / role — sums to POOL_SIZE ------------------------- */
-const SKILL_MIX: Slice[] = [
-  { key: 'engineering', label: 'Engineering', value: 96, color: 'var(--chart-1)' },
-  { key: 'sales', label: 'Sales', value: 78, color: 'var(--chart-2)' },
-  { key: 'design', label: 'Design', value: 54, color: 'var(--chart-3)' },
-  { key: 'operations', label: 'Operations', value: 46, color: 'var(--chart-4)' },
-  { key: 'other', label: 'Finance & Other', value: 68, color: 'var(--chart-5)' },
-];
-
-/* Candidates by source — sums to POOL_SIZE --------------------------- */
-const SOURCE_MIX = [
-  { label: 'JobStreet', count: 128 },
-  { label: 'LinkedIn', count: 104 },
-  { label: 'Referral', count: 58 },
-  { label: 'Careers page', count: 34 },
-  { label: 'Agency', count: 18 },
-];
 const SOURCE_SERIES: Series[] = [
   { key: 'count', label: 'Candidates', color: 'var(--chart-2)' },
 ];
-
-/* ------------------------------------------------------------------ */
 
 const STATUS_TONE: Record<Status, string> = {
   Available: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
@@ -200,7 +68,8 @@ function StatusPill({ status }: { status: Status }) {
   );
 }
 
-function Rating({ value }: { value: number }) {
+function Rating({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-xs text-muted-foreground">—</span>;
   const filled = Math.round(value);
   return (
     <span className="inline-flex items-center gap-1" title={`Rated ${value} of 5`}>
@@ -224,71 +93,55 @@ function Rating({ value }: { value: number }) {
   );
 }
 
-export default function TalentPoolScreen() {
+export default async function TalentPoolScreen({
+  searchParams,
+}: {
+  /** The page's query string: `q` is what the table is searched for. Optional, so the screen can be drawn without one. */
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
+  const search = poolSearchText(((await searchParams) ?? {}).q);
+  const [{ model }, viewer] = await Promise.all([
+    loadHire('talent-pool', (data) => buildPoolModel(data, search)),
+    getViewer(),
+  ]);
+  // Worked out once for the screen. Each action checks again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  const roleSlices: Slice[] = topSlices(
+    model?.byTitle ?? [],
+    (r) => r.value,
+    (r) => r.label,
+  ).map((slice, index) => ({ ...slice, color: SKILL_COLORS[index % SKILL_COLORS.length] }));
+  const statusCount = (key: Status) =>
+    model ? (model.statusCounts.find((s) => s.key === key)?.value ?? 0) : '—';
+  // How many are shown or match; or, when a search matched nobody, the sentence that stands in for the table.
+  const footer = model
+    ? (poolFooter({ search: model.search, matched: model.matched, shown: model.rows.length, size: model.size })
+      ?? poolNoMatch(model.search ?? ''))
+    : '';
+
   return (
     <ScreenContainer>
       <PageHeader
         className="mb-3"
         title="Talent Pool"
         subtitle="Saved candidates for future roles, Saudara."
-        actions={
-          <Button size="sm">
-            <Plus className="size-4" />
-            Add to Pool
-          </Button>
-        }
+        actions={canEdit ? <AddToPool /> : null}
       />
 
       <BentoGrid>
-        {/* KPI row */}
-        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
+        {/* KPI row: every figure is counted over the whole pool, whatever is searched for. The four statuses add up to the size. */}
+        <BentoCard tone="primary" className="col-span-2 md:col-span-4">
           <BentoStat
             label="Talent pool size"
-            value={POOL_SIZE.toLocaleString()}
-            delta="+6"
+            value={model ? model.size.toLocaleString() : '—'}
             onPrimary
-            chart={
-              <Sparkline
-                data={SPARK_POOL}
-                color="var(--primary-foreground)"
-                height={36}
-              />
-            }
           />
         </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Shortlisted"
-            value="48"
-            delta="+4"
-            deltaTone="up"
-            chart={
-              <Sparkline data={SPARK_SHORTLISTED} color="var(--chart-1)" height={36} />
-            }
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Passive"
-            value="186"
-            delta="+9"
-            deltaTone="flat"
-            chart={
-              <Sparkline data={SPARK_PASSIVE} color="var(--chart-4)" height={36} />
-            }
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Re-engaged"
-            value="23"
-            delta="+5"
-            deltaTone="up"
-            chart={
-              <Sparkline data={SPARK_REENGAGED} color="var(--chart-3)" height={36} />
-            }
-          />
-        </BentoCard>
+        {(['Available', 'Shortlisted', 'Passive', 'Re-engaged'] as const).map((key) => (
+          <BentoCard key={key} className="col-span-1 md:col-span-2">
+            <BentoStat label={key} value={statusCount(key)} />
+          </BentoCard>
+        ))}
 
         {/* Skill mix + source breakdown */}
         <BentoCard
@@ -297,12 +150,16 @@ export default function TalentPoolScreen() {
           icon={PieChart}
           className="col-span-2 md:col-span-4"
         >
-          <DonutStat
-            data={SKILL_MIX}
-            height={240}
-            centerValue={POOL_SIZE.toLocaleString()}
-            centerLabel="candidates"
-          />
+          {!model ? LOAD_FAILED : model.size === 0 ? (
+            <Muted>No one in the talent pool yet</Muted>
+          ) : (
+            <DonutStat
+              data={roleSlices}
+              height={240}
+              centerValue={model.size.toLocaleString()}
+              centerLabel="candidates"
+            />
+          )}
         </BentoCard>
         <BentoCard
           title="Candidates by source"
@@ -310,114 +167,125 @@ export default function TalentPoolScreen() {
           icon={BarChart3}
           className="col-span-2 md:col-span-8"
         >
-          <BarGroup
-            data={SOURCE_MIX}
-            series={SOURCE_SERIES}
-            horizontal
-            height={240}
-          />
+          {!model ? LOAD_FAILED : model.size === 0 ? (
+            <Muted>No one in the talent pool yet</Muted>
+          ) : (
+            <BarGroup
+              data={model.bySource.slice(0, 6).map((r) => ({ label: r.label, count: r.value }))}
+              series={SOURCE_SERIES}
+              horizontal
+              height={240}
+            />
+          )}
         </BentoCard>
 
         {/* Candidate table */}
         <BentoCard
           title="Pool candidates"
-          subtitle="Most recently added first"
+          subtitle="Newest on file first"
           icon={Users}
           flush
           className="col-span-2 md:col-span-12"
         >
+          {/* Where a change is said ("Added …", "Removed …", "Deleted …"): the row it was said about may have gone. Only for someone who may edit. */}
+          {canEdit ? <DeletionNotice className="px-4 pb-2" /> : null}
+          {model?.readCapped ? <p className="px-4 pb-2 text-xs text-muted-foreground">{POOL_READ_CAPPED}</p> : null}
           <div className="flex flex-wrap items-center gap-2 px-4">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Search by name or skill…" className="h-8 pl-8 text-sm" />
-            </div>
-            <Select defaultValue="all">
-              <SelectTrigger size="sm" className="w-full sm:w-44">
+            {/* For everyone, viewers included: it changes nothing, it only finds. */}
+            <PoolSearch search={model?.search ?? search} />
+            <Select defaultValue="all" disabled>
+              <SelectTrigger size="sm" title="Coming soon" className="w-full sm:w-44">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All roles</SelectItem>
-                <SelectItem value="engineering">Software Engineer</SelectItem>
-                <SelectItem value="sales">Sales Executive</SelectItem>
-                <SelectItem value="account">Account Manager</SelectItem>
-                <SelectItem value="operations">Operations</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" disabled title="Coming soon">
               <Filter className="size-4" />
               Filter
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" disabled title="Coming soon">
               All sources
               <ChevronDown className="size-4" />
             </Button>
           </div>
-          <div className="mt-3 overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Candidate</TableHead>
-                  <TableHead>Skills</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Rating</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {CANDIDATES.map((c) => (
-                  <TableRow key={c.name}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                          {c.name.charAt(0)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">{c.name}</p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {c.title}
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex max-w-[220px] flex-wrap gap-1">
-                        {c.skills.map((s) => (
-                          <Badge key={s} variant="secondary">
-                            {s}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                        <MapPin className="size-3.5" />
-                        {c.location}
-                      </span>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-sm">
-                      {c.source}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      <Rating value={c.rating} />
-                    </TableCell>
-                    <TableCell>
-                      <StatusPill status={c.status} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="outline" size="sm">
-                        Move to pipeline
-                      </Button>
-                    </TableCell>
+          {!model ? LOAD_FAILED : model.size === 0 ? (
+            <Muted>No one in the talent pool yet</Muted>
+          ) : (
+          <>
+            {model.rows.length > 0 ? (
+            <div className="mt-3 overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Candidate</TableHead>
+                    <TableHead>Skills</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Rating</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <div className="border-t px-4 py-3 text-sm text-muted-foreground">
-            Showing {CANDIDATES.length} of {POOL_SIZE.toLocaleString()} candidates
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {model.rows.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                            {c.name.charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{c.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {c.title}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex max-w-[220px] flex-wrap gap-1">
+                          {c.skills.map((s) => (
+                            <Badge key={s} variant="secondary">
+                              {s}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <MapPin className="size-3.5" />
+                          {c.location}
+                        </span>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {c.source}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <Rating value={c.rating} />
+                      </TableCell>
+                      <TableCell>
+                        <StatusPill status={c.status} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {/* An id, a name and the two statuses: nothing else goes to the browser. Only for someone who may edit; each action checks again. */}
+                        {canEdit ? (
+                          <PoolRowControls
+                            candidate={{ id: c.id, name: c.name, poolStatus: c.poolStatus, label: c.status }}
+                            jobs={model.jobs}
+                          />
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            ) : null}
+            <PoolFooter className="border-t px-4 py-3" line={footer} />
+          </>
+          )}
         </BentoCard>
       </BentoGrid>
     </ScreenContainer>

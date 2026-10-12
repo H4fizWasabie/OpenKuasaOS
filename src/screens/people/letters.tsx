@@ -1,208 +1,210 @@
-import {
-  Download,
-  Eye,
-  FileText,
-  LayoutTemplate,
-  PieChart,
-  Plus,
-} from 'lucide-react';
-import { ScreenContainer } from '@/components/screen/screen-container';
+import { FileText, LayoutTemplate, PieChart } from 'lucide-react';
+import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
+import { DonutStat } from '@/components/charts';
+import { LetterDialog } from '@/components/people/letter-form';
+import { LetterRowControls } from '@/components/people/letter-row-controls';
+import { LetterViewDialog } from '@/components/people/letter-view';
+import { RequestRow } from '@/components/people/request-row';
+import { TemplatesSection } from '@/components/people/templates-section';
 import { PageHeader } from '@/components/screen/page-header';
-import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
-import { DonutStat, type Slice } from '@/components/charts';
-import { LiveDot } from '@/components/ui/live-dot';
-import { Button } from '@/components/ui/button';
+import { ScreenContainer } from '@/components/screen/screen-container';
 import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { cn } from '@/lib/utils';
+import { LiveDot } from '@/components/ui/live-dot';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { todayInMalaysia } from '@/lib/people/dates';
+import { buildLetterTemplatesModel, buildLettersModel } from '@/lib/people/documents';
+import { lettersScreenControls, visibleLetterRows } from '@/lib/people/letters-screens';
+import { EmployeeCell, HR_ONLY, LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
 
-/* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
+const SAMPLE_WORKSPACE = 'Sample company';
 
-type LetterStatus = 'Issued' | 'Draft';
+/**
+ * HR letters. Owners and admins write, issue and pull back letters and keep the templates; anyone else sees the
+ * issued letters addressed to them (awaiting acknowledgement first), which the database has already narrowed. The
+ * demo sees the team's letters and templates with no control to change anything.
+ */
+export default async function LettersScreen() {
+  const { model: loaded, viewer } = await loadPeople('letters', async (data, now, ctx) => {
+    const team = ctx.viewer.isHr || ctx.viewer.isDemo;
+    const [letters, templates, employees, workspaceName] = await Promise.all([
+      data.listLetters(),
+      team ? data.listLetterTemplates() : Promise.resolve([]),
+      ctx.viewer.isHr && !ctx.viewer.isDemo ? data.listEmployees() : Promise.resolve([]),
+      (async () => {
+        if (!hasSupabaseEnv() || !ctx.orgId) return SAMPLE_WORKSPACE;
+        const { data: org } = await ctx.client.from('orgs').select('name').eq('id', ctx.orgId).maybeSingle();
+        return (org as { name?: string } | null)?.name ?? '';
+      })(),
+    ]);
+    return {
+      letters: buildLettersModel(letters, ctx.viewer, todayInMalaysia(now)),
+      templates: buildLetterTemplatesModel(templates, ctx.viewer),
+      people: employees.filter((e) => e.status === 'active').map((e) => ({ id: e.id, name: e.name })),
+      workspaceName,
+    };
+  });
 
-type Letter = {
-  id: string;
-  letter: string;
-  employee: string;
-  type: string;
-  date: string;
-  status: LetterStatus;
-};
+  const model = loaded?.letters ?? null;
+  const templates = loaded?.templates ?? null;
+  const workspaceName = loaded?.workspaceName ?? '';
+  // The controls that change a letter or a template are drawn for an owner or admin outside the demo only.
+  const editing = lettersScreenControls(viewer, loaded !== null).write;
+  const rows = model ? visibleLetterRows(model) : [];
+  const totals = model?.totals ?? null;
+  const dash = '—';
+  const templateOptions =
+    templates && templates.allowed ? templates.rows.map((t) => ({ id: t.id, name: t.name, type_label: t.type_label })) : [];
 
-const LETTERS: Letter[] = [
-  { id: '1', letter: 'Offer Letter', employee: 'Hafiz Omar', type: 'Offer', date: '06 Oct', status: 'Draft' },
-  { id: '2', letter: 'Offer Letter', employee: 'Aisyah Rahim', type: 'Offer', date: '01 Oct', status: 'Issued' },
-  { id: '3', letter: 'Confirmation Letter', employee: 'Faiz Hakim', type: 'Confirmation', date: '28 Sep', status: 'Issued' },
-  { id: '4', letter: 'Warning Letter (Surat Amaran)', employee: 'Confidential', type: 'Warning', date: '20 Sep', status: 'Draft' },
-  { id: '5', letter: 'Reference Letter', employee: 'Nurul Huda', type: 'Reference', date: '15 Sep', status: 'Issued' },
-  { id: '6', letter: 'EA Form (CP8A)', employee: 'Ahmad Zaki', type: 'EA', date: '12 Sep', status: 'Issued' },
-  { id: '7', letter: 'EA Form (CP8A)', employee: 'Lim Wei Jie', type: 'EA', date: '11 Sep', status: 'Issued' },
-  { id: '8', letter: 'Salary Adjustment', employee: 'Siti Aminah', type: 'Adjustment', date: '10 Sep', status: 'Draft' },
-];
-
-const STATUS_STYLE: Record<LetterStatus, string> = {
-  Issued: 'bg-emerald-500/15 text-emerald-600',
-  Draft: 'bg-amber-500/15 text-amber-600',
-};
-
-/* Letters issued by type (YTD) — sums to 96 */
-const BY_TYPE: Slice[] = [
-  { key: 'ea', label: 'EA form', value: 42, color: 'var(--chart-1)' },
-  { key: 'offer', label: 'Offer', value: 24, color: 'var(--chart-2)' },
-  { key: 'confirmation', label: 'Confirmation', value: 18, color: 'var(--chart-3)' },
-  { key: 'reference', label: 'Reference', value: 9, color: 'var(--chart-5)' },
-  { key: 'warning', label: 'Warning', value: 3, color: 'var(--chart-4)' },
-];
-
-type Template = { name: string; used: number; active: boolean };
-
-const TEMPLATES: Template[] = [
-  { name: 'EA Form (CP8A)', used: 42, active: true },
-  { name: 'Offer Letter', used: 24, active: true },
-  { name: 'Confirmation Letter', used: 18, active: true },
-  { name: 'Reference Letter', used: 9, active: true },
-  { name: 'Salary Adjustment', used: 6, active: false },
-  { name: 'Warning Letter', used: 3, active: true },
-];
-
-/* ------------------------------------------------------------------ */
-
-export default function LettersScreen() {
   return (
     <ScreenContainer>
       <PageHeader
         className="mb-3"
         title="HR Letters"
-        subtitle="Generate and manage employee letters, Saudara."
-        actions={
-          <Button size="sm">
-            <Plus className="size-4" />
-            Generate Letter
-          </Button>
-        }
+        subtitle={model && !model.team ? 'Your letters' : 'Letters to employees'}
+        actions={editing && loaded ? <LetterDialog employees={loaded.people} templates={templateOptions} /> : null}
       />
 
       <BentoGrid>
-        {/* KPI row */}
-        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
-          <BentoStat label="Issued" value="96" delta="YTD" deltaTone="flat" onPrimary />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Drafts" value="5" delta="in progress" deltaTone="flat" />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Templates" value="8" delta="active" deltaTone="flat" />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Issued this month" value="8" delta="+3" deltaTone="up" />
-        </BentoCard>
+        {model && !model.team ? null : (
+          <>
+            <BentoCard tone="primary" className="col-span-1 md:col-span-4">
+              <BentoStat label="Issued this year" value={totals ? totals.issued_this_year : dash} onPrimary />
+            </BentoCard>
+            <BentoCard className="col-span-1 md:col-span-4">
+              <BentoStat label="Drafts" value={totals ? totals.drafts : dash} />
+            </BentoCard>
+            <BentoCard className="col-span-2 md:col-span-4">
+              <BentoStat label="Issued this month" value={totals ? totals.issued_this_month : dash} />
+            </BentoCard>
+            <BentoCard
+              title="Letters by type"
+              subtitle="Issued this year"
+              icon={PieChart}
+              className="col-span-2 md:col-span-12"
+            >
+              {!model ? (
+                LOAD_FAILED
+              ) : !model.by_type ? (
+                HR_ONLY
+              ) : model.by_type.length === 0 ? (
+                <Muted>No letters issued this year</Muted>
+              ) : (
+                <DonutStat
+                  data={model.by_type}
+                  height={240}
+                  centerValue={String(totals?.issued_this_year ?? 0)}
+                  centerLabel="issued"
+                />
+              )}
+            </BentoCard>
+          </>
+        )}
 
-        {/* By type + templates */}
         <BentoCard
-          title="Letters by type"
-          subtitle="Issued YTD"
-          icon={PieChart}
-          className="col-span-2 md:col-span-5"
-        >
-          <DonutStat data={BY_TYPE} height={240} centerValue="96" centerLabel="issued" />
-        </BentoCard>
-        <BentoCard
-          title="Letter templates"
-          subtitle="Most used"
-          icon={LayoutTemplate}
-          className="col-span-2 md:col-span-7"
-        >
-          <ul className="divide-y">
-            {TEMPLATES.map((t) => (
-              <li key={t.name} className="flex items-center gap-3 py-2.5">
-                <LiveDot active={t.active} />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {t.name}
-                </span>
-                <span className="shrink-0 text-sm tabular-nums text-muted-foreground">
-                  used {t.used}×
-                </span>
-              </li>
-            ))}
-          </ul>
-        </BentoCard>
-
-        {/* Letters table */}
-        <BentoCard
-          title="Recent letters"
-          subtitle="Pulsing dot marks drafts in progress"
+          title={model && !model.team ? 'Your letters' : 'Recent letters'}
+          subtitle={
+            model && !model.team
+              ? 'Newest first, letters waiting for you at the top'
+              : 'Drafts first · a pulsing dot marks a draft in progress'
+          }
           icon={FileText}
           flush
           className="col-span-2 md:col-span-12"
         >
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Letter</TableHead>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {LETTERS.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell className="whitespace-nowrap font-medium">
-                      {l.letter}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                          {l.employee.charAt(0)}
-                        </span>
-                        <span className="whitespace-nowrap">{l.employee}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{l.type}</Badge>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {l.date}
-                    </TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-2">
-                        <LiveDot active={l.status === 'Draft'} />
-                        <span
-                          className={cn(
-                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                            STATUS_STYLE[l.status],
-                          )}
-                        >
-                          {l.status}
-                        </span>
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" aria-label="View letter">
-                          <Eye className="size-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" aria-label="Download letter">
-                          <Download className="size-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+          {!model ? (
+            LOAD_FAILED
+          ) : rows.length === 0 ? (
+            <Muted>{model.team ? 'No letters yet' : 'No letters addressed to you yet'}</Muted>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead>Letter</TableHead>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Action</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => {
+                    const cells = (
+                      <>
+                        <TableCell className="whitespace-nowrap font-medium">{row.title}</TableCell>
+                        <TableCell>
+                          <EmployeeCell name={row.employee_name} />
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{row.type_label}</Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.date_label}</TableCell>
+                        <TableCell>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <LiveDot active={row.status === 'draft'} />
+                            <StatusPill tone={row.status === 'issued' ? 'good' : 'pending'}>
+                              {row.status === 'issued' ? 'Issued' : 'Draft'}
+                            </StatusPill>
+                            {row.status === 'issued' && row.awaiting_acknowledgement ? (
+                              <StatusPill tone="pending">Awaiting acknowledgement</StatusPill>
+                            ) : null}
+                            {row.status === 'issued' && row.acknowledged_label ? (
+                              <span className="text-xs text-muted-foreground">{row.acknowledged_label}</span>
+                            ) : null}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {editing ? (
+                            <LetterRowControls letter={row} workspaceName={workspaceName} />
+                          ) : (
+                            <LetterViewDialog letter={row} workspaceName={workspaceName} />
+                          )}
+                        </TableCell>
+                      </>
+                    );
+                    return editing ? (
+                      <RequestRow key={row.id} columns={6}>
+                        {cells}
+                      </RequestRow>
+                    ) : (
+                      <TableRow key={row.id}>{cells}</TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </BentoCard>
+
+        {templates && templates.allowed ? (
+          <BentoCard
+            title="Templates"
+            subtitle="Starting points for letters, with the employee's details filled in"
+            icon={LayoutTemplate}
+            className="col-span-2 md:col-span-12"
+          >
+            {editing ? (
+              <TemplatesSection rows={templates.rows} />
+            ) : templates.rows.length === 0 ? (
+              <Muted>No templates yet</Muted>
+            ) : (
+              <ul className="divide-y">
+                {templates.rows.map((t) => (
+                  <li key={t.id} className="space-y-1 py-3 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold">{t.name}</h3>
+                      <Badge variant="secondary">{t.type_label}</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{t.title}</p>
+                    <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{t.body}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </BentoCard>
+        ) : null}
       </BentoGrid>
     </ScreenContainer>
   );
