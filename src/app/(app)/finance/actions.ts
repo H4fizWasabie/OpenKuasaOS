@@ -45,6 +45,16 @@ import {
   voidCreditNote,
 } from '@/lib/finance/credit-notes';
 import {
+  EXPENSE_MESSAGES,
+  approveExpense,
+  deleteExpense,
+  expenseDecisionInput,
+  expenseIdInput,
+  rejectExpense,
+  saveExpense,
+  saveExpenseInput,
+} from '@/lib/finance/expenses';
+import {
   INVOICE_MESSAGES,
   type InvoiceDetail,
   type SaveAndPostInvoiceResult,
@@ -253,10 +263,10 @@ const CONTACT_PATHS = [
   '/finance/journals',
 ];
 const PRODUCT_PATHS = ['/finance/products'];
-// The two ledger screens read the books, which every document that posts, voids, pays or is deleted changes:
-// Chart of Accounts shows each account's balance and Journals lists the manual entries beside them. So every
-// list below that belongs to such an action ends with these two.
-const LEDGER_PATHS = ['/finance/chart-of-accounts', '/finance/journals'];
+// The three ledger screens read the books, which every document that posts, voids, pays or is deleted changes:
+// Chart of Accounts shows each account's balance, Journals lists the manual entries beside them and Reports
+// works the statements out of every line. So every list below that belongs to such an action ends with these three.
+const LEDGER_PATHS = ['/finance/chart-of-accounts', '/finance/journals', '/finance/reports'];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
 // supplier is also a voucher: Payment Vouchers lists every movement of money out.
 const PURCHASE_PATHS = [
@@ -750,6 +760,44 @@ export async function deleteCashReceiptAction(input: unknown) {
 /** Saves the receipt as a draft, then posts it; see `saveThenPost`. Someone who may not sign off keeps the draft. */
 export async function saveAndPostCashReceiptAction(input: unknown): Promise<SaveAndPostCashReceiptResult> {
   return saveThenPost(SALES_PATHS, saveCashReceiptInput, input, saveCashReceipt, postCashReceipt, true);
+}
+
+/* ---- expenses ---------------------------------------------------------- */
+
+// An expense is on Expenses. Receipts Inbox names the expense a receipt is tied to (its category), and deleting
+// an expense sends its receipt back to Unmatched. Payment Vouchers and Banking name the category of the expenses
+// a voucher pays, which changes when a rejected expense that a voided voucher still names is edited. An approved
+// expense is two lines of the books (its category's account and Accrued Expenses), so approving or rejecting one
+// moves Chart of Accounts, Journals and Reports (LEDGER_PATHS): they end the list, as every action that changes the books does.
+const EXPENSE_PATHS = [
+  '/finance/expenses',
+  '/finance/receipts-inbox',
+  '/finance/payment-vouchers',
+  '/finance/banking',
+  ...LEDGER_PATHS,
+];
+/** Approving or rejecting an expense: an owner or admin only, told so in the expense's own words. */
+const EXPENSE_DECIDE = { signOff: true, signOffError: EXPENSE_MESSAGES.needsDecider } as const;
+
+/**
+ * Creates an expense, or changes one that is pending or was rejected. Anyone who may write can do this. The
+ * database approves it in the same call when the person saving is an owner or admin, and leaves it pending
+ * otherwise; the answer says which.
+ */
+export async function saveExpenseAction(input: unknown) {
+  return run(EXPENSE_PATHS, saveExpenseInput, input, saveExpense);
+}
+/** Approves a pending expense as the person was shown it (every field the row showed, `updated_at` included): an owner or admin only, which the expense's own guard enforces. */
+export async function approveExpenseAction(input: unknown) {
+  return run(EXPENSE_PATHS, expenseDecisionInput, input, approveExpense, EXPENSE_DECIDE);
+}
+/** Rejects a pending expense, or an approved one that no payment stands against: an owner or admin only. */
+export async function rejectExpenseAction(input: unknown) {
+  return run(EXPENSE_PATHS, expenseDecisionInput, input, rejectExpense, EXPENSE_DECIDE);
+}
+/** Deletes a pending or rejected expense. */
+export async function deleteExpenseAction(input: unknown) {
+  return run(EXPENSE_PATHS, expenseIdInput, input, deleteExpense);
 }
 
 /* ---- chart of accounts and journals ------------------------------------ */
