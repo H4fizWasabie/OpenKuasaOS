@@ -47,6 +47,9 @@ the data layer, with unit tests; the client components only draw them.
 | `receipt-files.ts` | What is decided about a file before it is uploaded: its type from its first bytes (`sniffReceiptType`), the path it is stored at, the name kept to show (`cleanFileName`), what a refused upload means, and the upload queue's states |
 | `receipt-inbox.ts` | The inbox's writes and its review form: record an upload (`registerReceipt`), review (`reviewReceipt`), delete (`deleteInboxReceipt`), read a receipt's path and sign a download link, and the sentences for `FIN11`, `FIN23`, `FIN24` |
 | `receipt-files-server.ts` | Server only: reads a stored file's first bytes before it is opened (`storedFileCheck`), removes a deleted receipt's file (`removeReleasedReceiptFile`) and runs the clean-up (`cleanReceiptFiles`) |
+| `rfqs.ts` | RFQs (requests for quotation). Described here only for the link a copied RFQ keeps: `saveRfqInput` takes `source_rfq_id`, the RFQ a new draft was copied from, which must be an id, and `saveRfq` sends it to `finance_save_rfq`; a list row carries `source_rfq_id` (the first RFQ of its group, or null) and one RFQ read with its lines carries `quoted_at` (when the supplier's answer was recorded); `getRfqGroup` reads the RFQs of one RFQ's group that have gone to their supplier, with their lines, in the order they were made. `saveRfq` words `FIN11` on a new copy with a sentence of its own (`RFQ_MESSAGES.copiedFromGone`) |
+| `rfq-form.ts` | The RFQ form. A form opened by Copy to another supplier (`rfqFormCopiedFrom`) remembers the RFQ it was copied from, and `rfqPayload` sends it with the new draft. When that save is refused because the RFQ it was copied from is gone, `rfqFormAfterRefusal` drops the link, so saving again saves the RFQ on its own; the shared card applies it through `DocumentFormKind.afterRefusal`, which no other form has |
+| `rfq-compare.ts` | Compare quotes, pure. A group is the first RFQ and every RFQ that names it (`rfqGroupId`); an RFQ can be compared once it and at least one other of its group have gone to their supplier (`comparableRfqIds`), and `rfqActions(row, comparable)` in `purchase-views.ts` then offers Compare quotes in every status but draft. `compareQuotes` lays the group out as a row for each item and a cell for each RFQ: lines are matched by product, or else by description, in the same unit and pack size; only an RFQ whose answer was recorded (`quoted_at`) has prices; the lowest price is for one unit with SST added, compared to four decimals, marked on every supplier tied at it and only when at least two priced the line; a cell worded differently from its row keeps its own description. Also the question the card asks before making an order (`orderableRfq`) and what deleting a draft costs the RFQs copied from it (`rfqCopyCount`, `rfqDeleteWarning`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
 The forms validate by running the write's own Zod schema on what they are about
@@ -163,6 +166,7 @@ policy.
 | `private.finance_receipt_deletions` | The paths of files to remove from the bucket. Written by a trigger when a receipt is deleted and by the clean-up function that finds unrecorded uploads; reachable by nobody but four `service_role` functions. |
 | `finance_statement_imports` | One row per bank statement file imported for one account: `account_id`, `file_name`, `created_by`. |
 | `finance_statement_lines` | One row per line of a statement, in the file's order (`position`): `line_date`, `description`, and `money_in` or `money_out`, never both. `transaction_id` is the movement of money a person matched it to; a movement is matched by at most one line. A line belongs to its import's account. |
+| `finance_rfqs` | RFQs. Described here only for `source_rfq_id`: the first RFQ of the group a copied RFQ belongs to, and null for the first RFQ itself and for an RFQ that was not copied from another. It is set once, when the copy is first saved, and a copy of a copy names the first RFQ, so a group is one RFQ and every RFQ that names it, with no chain to follow. The foreign key is on `(org_id, source_rfq_id)`, so the link never leaves the workspace, and there is an index on the same pair. After that the link does not change, except that deleting the first RFQ, which only a draft allows, clears it on every copy (`on delete set null (source_rfq_id)`). |
 
 ## Document numbers
 
@@ -1291,6 +1295,17 @@ anyone else.
 | `finance_import_statement(target_org, target_account, file_name, lines)` | Stores one statement for one account. `lines` is a list of `{ line_date, description, money_in, money_out }` in the file's order, at most 1,000. Returns the import's id. |
 | `finance_next_number(target_org, doc)` | The next document number. Runs as its owner; the only writer of `finance_sequences`. |
 | `finance_account_numbers(target_org)` | The account numbers of the workspace, one row per account, for someone who may write there; nobody else gets a row. |
+| `finance_save_rfq(target_org, rfq, lines)` | Creates a draft RFQ or replaces a draft's header and lines, and returns the id. Since `20261116090000_bendahara_rfq_source` it writes `rfq.source_rfq_id` when it creates a draft. Saving a draft again leaves the link as it is, whatever is sent. |
+
+The same migration changes two more things. The RFQ guard
+(`private.finance_rfq_guard`, the trigger on `finance_rfqs`) sets the link
+when an RFQ is inserted: it follows a copy of a copy back to the first RFQ,
+and refuses a source it cannot find in the RFQ's own workspace (`FIN11`), so
+a new RFQ cannot name another workspace's RFQ, or itself. On an update it
+refuses any change to the link (`FIN01`); the one change it lets through is
+the foreign key clearing the link because the first RFQ was deleted. The view
+`finance_rfq_totals` lists its columns by name and ends with a new one,
+`source_rfq_id`; the columns before it are the same, in the same order.
 
 Accepting or declining a quotation, voiding a credit note or a refund, and
 deleting a draft quotation, a draft credit note or a pending refund, are plain
@@ -1359,6 +1374,19 @@ meanings of their own, for journals and a bill's category, and are not in this
 table yet. A code is read by the function that made the call, so each data
 layer words the codes its own functions can answer; a sentence for one of these
 codes must never go in a map that both share.
+
+For an RFQ's link to the RFQ it was copied from, the RFQ guard raises two of
+the codes above, and `rfqs.ts` words them. `FIN11`: the RFQ a new RFQ names
+is not there to copy. It was deleted, or it is another workspace's, or the
+caller may not read it, or the new RFQ names itself; all are answered alike.
+On saving a new copy
+`rfqs.ts` says "The RFQ this was copied from no longer exists. Save again to
+keep this one on its own.", and the form drops the link; any other `FIN11`
+on an RFQ stays "That RFQ no longer exists." `FIN01`: the link was changed
+after it was set, cleared by hand or pointed at the RFQ itself included.
+`rfqs.ts` has the RFQ's `FIN01` sentence for it, but no screen can reach it,
+because `finance_save_rfq` does not write the link when a draft is saved
+again.
 
 | Code | Meaning (continued) |
 |---|---|
@@ -1987,3 +2015,22 @@ with no date).
   anonymous accounts. They remove their own files; a run that is killed
   half-way can leave files in the bucket, which the clean-up run takes
   after an hour.
+- Only RFQs made with Copy to another supplier after
+  `20261116090000_bendahara_rfq_source` can be compared. RFQs that existed
+  before it, and RFQs typed separately for the same request, carry no link,
+  and nothing joins them afterwards.
+- Compare quotes matches lines by unit and pack size as they were typed. A
+  carton of 12 is not compared with singles: they are two rows, each with one
+  price and no mark. `pcs` and `pc` are two rows as well; a capital or a
+  stray space is not a difference.
+- Deleting the first RFQ of a group, which only a draft allows, clears the
+  link on its copies for good: they can no longer be compared with each
+  other. The delete question says so when RFQs were copied from the draft. A
+  copy made afterwards from one of them starts a new group of those two.
+- Viewers and the demo cannot open the comparison, although it only reads:
+  `getRfqComparisonAction` answers a person who may edit, and the row menu it
+  is opened from is drawn only for them.
+- `20261116090000_bendahara_rfq_source` must be applied before this code is
+  deployed. The RFQs list reads `source_rfq_id` from `finance_rfq_totals`,
+  and without the column the screen does not load. The other order is safe:
+  the code before it sends no link and reads the view's columns by name.
