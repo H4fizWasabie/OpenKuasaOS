@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { comparableRfqIds, compareQuotes, rfqGroupId } from '@/lib/finance/rfq-compare';
+import { comparableRfqIds, compareQuotes, orderableRfq, rfqGroupId } from '@/lib/finance/rfq-compare';
 import type { RfqDetail, RfqLine, RfqListRow } from '@/lib/finance/rfqs';
 
 const row = (id: string, over: Partial<RfqListRow> = {}): RfqListRow => ({
@@ -67,6 +67,25 @@ describe('RFQ groups', () => {
       row('e', { source_rfq_id: 'd', status: 'draft' }),
     ];
     expect([...comparableRfqIds(rows)].sort()).toEqual(['a', 'b']);
+  });
+});
+
+describe('the Make purchase order question in the comparison', () => {
+  const group = [
+    rfq('a', []),
+    rfq('b', [], { purchase_order_id: 'po-1', purchase_order_no: 'PO-0004' }),
+    rfq('c', [], { status: 'sent', quoted_at: null }),
+    rfq('d', [], { status: 'closed' }),
+  ];
+  it('is about the RFQ as the group now reads', () => {
+    expect(orderableRfq(group, 'a')).toBe(group[0]);
+  });
+  it('goes when its RFQ has an order, is not quoted, has left the group, or nothing is asked', () => {
+    for (const id of ['b', 'c', 'd', 'gone', null]) expect(orderableRfq(group, id), String(id)).toBeNull();
+  });
+  it('goes after a refusal once the group, read again, shows the order someone else made', () => {
+    expect(orderableRfq([rfq('a', []), rfq('e', [])], 'a')?.id).toBe('a');
+    expect(orderableRfq([rfq('a', [], { purchase_order_id: 'po-9' }), rfq('e', [])], 'a')).toBeNull();
   });
 });
 

@@ -364,11 +364,17 @@ export function RfqsView({
       );
     }
     if (open.kind === 'compare') {
+      const { rfq } = open;
       return open.group ? (
         <RfqCompareCard
-          key={open.rfq.id}
+          key={rfq.id}
           rfqs={open.group}
           convert={actions.convert}
+          // After a refused order: the same read that opened the card. If it is refused too, the card keeps what it had.
+          reload={async () => {
+            const again = await actions.getComparison({ id: rfq.id });
+            if (again.ok) setOpen((cur) => (cur?.kind === 'compare' && cur.rfq.id === rfq.id ? { ...cur, group: again.data } : cur));
+          }}
           onConverted={(rfq) => ask({ kind: 'converted', rfq })}
           onClose={close}
         />

@@ -7,6 +7,7 @@
  * (delivery time, past service), so the choice is the person's. Pure.
  */
 import { lineAmounts } from './bill-math';
+import { rfqActions } from './purchase-views';
 import type { RfqDetail, RfqListRow } from './rfqs';
 
 /** The id a group goes by: the first RFQ's. */
@@ -23,6 +24,15 @@ export function comparableRfqIds(rows: RfqListRow[]): Set<string> {
   const counts = new Map<string, number>();
   for (const row of sent) counts.set(rfqGroupId(row), (counts.get(rfqGroupId(row)) ?? 0) + 1);
   return new Set(sent.filter((row) => (counts.get(rfqGroupId(row)) ?? 0) > 1).map((row) => row.id));
+}
+
+/**
+ * The RFQ a "Make purchase order" question in the comparison is about, as the group now reads; null
+ * when nothing is being asked, or that RFQ has left the group or can no longer be made into an order.
+ * The group is read again after a refused order, so a question whose RFQ got an order meanwhile goes.
+ */
+export function orderableRfq(rfqs: RfqDetail[], id: string | null): RfqDetail | null {
+  return rfqs.find((rfq) => rfq.id === id && rfqActions(rfq).includes('convert')) ?? null;
 }
 
 /** One supplier's answer on one line. */

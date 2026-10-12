@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, ClipboardCheck, Scale } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { rm } from '@/lib/finance/format';
 import { RFQ_STATUS_LABELS, rfqActions } from '@/lib/finance/purchase-views';
-import { compareQuotes } from '@/lib/finance/rfq-compare';
+import { compareQuotes, orderableRfq } from '@/lib/finance/rfq-compare';
 import type { RfqDetail } from '@/lib/finance/rfqs';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
@@ -23,10 +23,16 @@ function unitPrice(n: number) {
  * lowest price on each line marked in words as well as colour, and "Not quoted" where a supplier gave
  * no price. A quoted column without an order gets Make purchase order, the RFQ's own action; closing the
  * other RFQs is left to the person. The rules are in src/lib/finance/rfq-compare.ts.
+ *
+ * The question it asks before making an order behaves as ConfirmRow's does: the button that is working
+ * keeps focus, Escape and Cancel take the question away and hand focus back to the button that asked it,
+ * and after a refusal the group is read again (`reload`), so a column that can no longer be ordered
+ * stops offering it.
  */
 export function RfqCompareCard({
   rfqs,
   convert,
+  reload,
   onConverted,
   onClose,
 }: {
@@ -34,6 +40,8 @@ export function RfqCompareCard({
   rfqs: RfqDetail[];
   /** Makes a draft purchase order from a quoted RFQ; absent for a person who may not. */
   convert?: (input: unknown) => Promise<FinResult<unknown>>;
+  /** Reads the group again and gives it back as `rfqs`, after an order was refused. */
+  reload?: () => Promise<void>;
   /** The order was made from this RFQ. */
   onConverted: (rfq: RfqDetail) => void;
   onClose: () => void;
@@ -41,6 +49,19 @@ export function RfqCompareCard({
   const rows = compareQuotes(rfqs);
   const [confirming, setConfirming] = useState<RfqDetail | null>(null);
   const action = useFinanceAction();
+  // The question is asked of the group as it now reads, not as it read when the question was opened.
+  const asked = orderableRfq(rfqs, confirming?.id ?? null);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const closeButton = useRef<HTMLButtonElement | null>(null);
+  const cancel = () => {
+    setConfirming(null);
+    opener.current?.focus();
+  };
+  // A question whose RFQ can no longer be ordered goes, and its buttons with it: focus goes to Close, not to the page.
+  const dropped = confirming !== null && asked === null;
+  useEffect(() => {
+    if (dropped && !action.pending) closeButton.current?.focus();
+  }, [dropped, action.pending]);
 
   return (
     <BentoCard
@@ -122,9 +143,10 @@ export function RfqCompareCard({
                       type="button"
                       size="sm"
                       variant="outline"
-                      aria-expanded={confirming?.id === r.id}
+                      aria-expanded={asked?.id === r.id}
                       disabled={action.pending}
-                      onClick={() => {
+                      onClick={(event) => {
+                        opener.current = event.currentTarget;
                         action.clear();
                         setConfirming(r);
                       }}
@@ -145,39 +167,67 @@ export function RfqCompareCard({
       </div>
 
       <div className="space-y-3 border-t px-4 py-3 text-sm">
-        {confirming && convert ? (
-          <div role="group" aria-label={`Make a purchase order from ${confirming.rfq_no}`} className="flex flex-wrap items-center gap-3">
+        {asked && convert ? (
+          <div
+            role="group"
+            aria-label={`Make a purchase order from ${asked.rfq_no}`}
+            className="flex flex-wrap items-center gap-3"
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape' || action.pending) return;
+              event.stopPropagation();
+              cancel();
+            }}
+          >
             <p className="basis-full">
-              Make a draft purchase order from <span className="font-medium">{confirming.rfq_no}</span> to{' '}
-              <span className="font-medium">{confirming.supplier_name}</span> ({rm(confirming.total)})? It gets the same supplier
+              Make a draft purchase order from <span className="font-medium">{asked.rfq_no}</span> to{' '}
+              <span className="font-medium">{asked.supplier_name}</span> ({rm(asked.total)})? It gets the same supplier
               and lines, at the prices quoted, and stays a draft on Purchase Orders until it is submitted for approval. The
               other RFQs stay as they are.
             </p>
+            {/* aria-disabled rather than disabled, as in ConfirmRow: a disabled button drops focus to the page. */}
             <Button
               type="button"
               size="sm"
-              disabled={action.pending}
+              aria-disabled={action.pending}
+              className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
               autoFocus
-              onClick={() => action.run(() => convert({ id: confirming.id }), () => onConverted(confirming))}
+              onClick={() => {
+                if (action.pending) return;
+                action.run(
+                  async () => {
+                    const result = await convert({ id: asked.id });
+                    if (!result.ok) {
+                      try {
+                        await reload?.();
+                      } catch {
+                        // The group could not be read again: the card stays as it was, under the refusal.
+                      }
+                    }
+                    return result;
+                  },
+                  () => onConverted(asked),
+                );
+              }}
             >
               {action.pending ? 'Making…' : 'Make purchase order'}
             </Button>
-            <Button type="button" size="sm" variant="outline" disabled={action.pending} onClick={() => setConfirming(null)}>
+            <Button type="button" size="sm" variant="outline" disabled={action.pending} onClick={cancel}>
               Cancel
             </Button>
-            {action.error ? (
-              <p role="alert" className="text-destructive">
-                {action.error}
-              </p>
-            ) : null}
           </div>
+        ) : null}
+        {/* Outside the question, so the refusal is still read once its question has gone. */}
+        {action.error ? (
+          <p role="alert" className="text-destructive">
+            {action.error}
+          </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <p className="flex-1 text-muted-foreground">
             Lowest is the lowest price for one unit once SST is added. The lowest price is not always the best choice:
             delivery time and past service count too.
           </p>
-          <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={action.pending} autoFocus data-finance-focus>
+          <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={action.pending} autoFocus data-finance-focus ref={closeButton}>
             Close
           </Button>
         </div>
