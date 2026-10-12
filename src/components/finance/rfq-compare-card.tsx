@@ -172,7 +172,7 @@ export function RfqCompareCard({
             Lowest is the lowest price for one unit once SST is added. The lowest price is not always the best choice:
             delivery time and past service count too.
           </p>
-          <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={action.pending} data-finance-focus>
+          <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={action.pending} autoFocus data-finance-focus>
             Close
           </Button>
         </div>
