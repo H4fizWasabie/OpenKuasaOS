@@ -51,8 +51,14 @@ begin
   select count(*) into n from pg_constraint
    where conname = 'finance_rfqs_source_fkey' and conrelid = 'public.finance_rfqs'::regclass
      and confrelid = 'public.finance_rfqs'::regclass and confdeltype = 'n'
-     and array_length(confdelsetcols, 1) = 1;
-  if n <> 1 then fails := array_append(fails, 'finance_rfqs_source_fkey is missing, or does not clear only source_rfq_id'); end if;
+     and array_length(confdelsetcols, 1) = 1 and array_length(conkey, 1) = 2;
+  if n <> 1 then
+    fails := array_append(fails, 'finance_rfqs_source_fkey is missing, is not tied to the workspace, or does not clear only source_rfq_id');
+  end if;
+  if not exists (select 1 from pg_index where indrelid = 'public.finance_rfqs'::regclass and indisvalid
+      and pg_get_indexdef(indexrelid) like '%(org_id, source_rfq_id)') then
+    fails := array_append(fails, 'there is no index on finance_rfqs (org_id, source_rfq_id)');
+  end if;
   select attname into t from pg_attribute
    where attrelid = 'public.finance_rfq_totals'::regclass and attnum > 0 and not attisdropped
    order by attnum desc limit 1;
@@ -115,8 +121,9 @@ begin
   end if;
 
   -- ---- saving a draft again keeps its link, whatever is sent ---------------
-  perform public.finance_save_rfq(org,
-    jsonb_build_object('id', copy2, 'supplier_id', sup3, 'rfq_date', current_date, 'source_rfq_id', copy2), one_line);
+  fails := fails || public.bendahara_check_try('a draft is saved again with another link in what is sent', 'ok',
+    format('select public.finance_save_rfq(%L, %L, %L)', org,
+      jsonb_build_object('id', copy2, 'supplier_id', sup3, 'rfq_date', current_date, 'source_rfq_id', copy2), one_line));
   select source_rfq_id::text into t from public.finance_rfqs where id = copy2;
   if t is distinct from first_rfq::text then fails := fails || format('saving a draft again changed its link to %s', t); end if;
 
@@ -163,6 +170,11 @@ begin
 
   -- ==== the workspace is deleted =============================================
   reset role;
+  -- As the table's owner with nobody signed in, row-level security does not apply: only the guard and the
+  -- foreign key stand between a new RFQ and another workspace's.
+  perform set_config('request.jwt.claims', '', true);
+  fails := fails || public.bendahara_check_try('another workspace''s RFQ is named with nobody signed in', 'FIN11',
+    format('insert into public.finance_rfqs (org_id, supplier_id, source_rfq_id) values (%L, %L, %L)', org, sup2, theirs));
   delete from public.orgs where id in (org, other_org);
   select count(*) into n from public.finance_rfqs where org_id in (org, other_org);
   if n <> 0 then fails := fails || format('deleting the workspaces left %s RFQs', n); end if;
