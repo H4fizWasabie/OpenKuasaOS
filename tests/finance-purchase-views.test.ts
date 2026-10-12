@@ -474,6 +474,21 @@ describe('rfqActions', () => {
       expect(rfqActions(rfq({ status, purchase_order_id: null })), status).not.toContain('convert');
     }
   });
+  it('offers Compare quotes on an RFQ that can be compared, in every status but draft, an order or not', () => {
+    expect(rfqActions(rfq({ status: 'draft', rfq_no: null }), true)).toEqual(['edit', 'send', 'copy', 'delete']);
+    expect(rfqActions(rfq({ status: 'sent' }), true)).toEqual(['recordPrices', 'compare', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'quoted' }), true)).toEqual(['convert', 'compare', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'quoted', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }), true)).toEqual([
+      'compare',
+      'copy',
+      'close',
+    ]);
+    expect(rfqActions(rfq({ status: 'closed' }), true)).toEqual(['compare', 'copy']);
+    // Not offered unless asked for: an RFQ with nothing to be compared with.
+    for (const status of ['draft', 'sent', 'quoted', 'closed'] as const) {
+      expect(rfqActions(rfq({ status }), false), status).not.toContain('compare');
+    }
+  });
   it('names an RFQ by its number, or as a draft', () => {
     expect(rfqName(rfq({ rfq_no: 'RFQ-0007' }))).toBe('RFQ-0007');
     expect(rfqName(rfq({ rfq_no: null, status: 'draft' }))).toBe('this draft RFQ');

@@ -61,6 +61,14 @@ describe('saveRfqInput', () => {
     expect(first({ ...valid, lines: [{ ...line, quantity: 0.0004 }] })).toBe('Enter a quantity above 0.');
     expect(first({ ...valid, lines: [{ ...line, sst_rate: 100.005 }] })).toBe('Enter an SST rate between 0 and 100.');
   });
+  it('takes the RFQ a new draft was copied from only as an id, with or without the draft’s own', () => {
+    for (const source_rfq_id of ['nope', '', null, 7]) {
+      expect(first({ ...valid, source_rfq_id }), String(source_rfq_id)).toBe('That RFQ no longer exists.');
+    }
+    expect(saveRfqInput.parse({ ...valid, source_rfq_id: ID }).source_rfq_id).toBe(ID);
+    expect(saveRfqInput.parse({ ...valid, id: ID, source_rfq_id: ID }).source_rfq_id).toBe(ID);
+    expect(saveRfqInput.parse(valid)).not.toHaveProperty('source_rfq_id');
+  });
   it('has no place for a number, a status or a supplier reference: the database gives those', () => {
     const parsed = saveRfqInput.parse({ ...valid, notes: '  ', rfq_no: 'RFQ-9999', status: 'quoted', supplier_ref: 'X' });
     expect(Object.keys(parsed).sort()).toEqual(['lines', 'notes', 'reply_by', 'rfq_date', 'supplier_id']);

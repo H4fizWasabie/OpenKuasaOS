@@ -136,6 +136,8 @@ describe('compareQuotes', () => {
   });
   it('tells prices apart in the fourth decimal', () => {
     expect(grid([rfq('a', [line('Screw', 0.045)]), rfq('b', [line('Screw', 0.0449)])])).toEqual(['Screw: 0.045, 0.0449*']);
+    // The same to the sen (12.34), so only the third and fourth decimals tell them apart.
+    expect(grid([rfq('a', [line('Bolt', 12.3412)]), rfq('b', [line('Bolt', 12.3449)])])).toEqual(['Bolt: 12.3412*, 12.3449']);
   });
   it('counts no price on an RFQ whose answer has not been recorded: one typed before sending is not a quote', () => {
     expect(
@@ -186,6 +188,18 @@ describe('compareQuotes', () => {
     expect(paper.cells.map((c) => c?.lowest)).toEqual([false, true, false, false]);
     // A space or a capital is not a different description; an RFQ with no recorded answer still says what it asks for.
     expect(paper.cells.map((c) => c?.description)).toEqual([null, 'A4 paper 70gsm (substitute)', null, 'A4 paper 75gsm']);
+  });
+  it('keeps lines apart that differ only in their unit, whether matched by product or by description', () => {
+    expect(
+      grid([
+        rfq('a', [line('Paper', 12, { uom: 'ream' }), line('Toner', 80, { product_id: 'p2', uom: 'pc' })]),
+        rfq('b', [line('Paper', 9, { uom: 'box' }), line('Toner', 70, { product_id: 'p2', uom: 'carton' })]),
+      ]),
+    ).toEqual(['Paper: 12, x', 'Toner: 80, x', 'Paper: x, 9', 'Toner: x, 70']);
+    // A capital or a stray space in the unit is still the same unit.
+    expect(grid([rfq('a', [line('Paper', 12, { uom: 'Ream ' })]), rfq('b', [line('Paper', 9, { uom: 'ream' })])])).toEqual([
+      'Paper: 12, 9*',
+    ]);
   });
   it('keeps two lines for the same item on one RFQ as two rows, matched in the order entered', () => {
     expect(

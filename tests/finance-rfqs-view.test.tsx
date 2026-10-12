@@ -313,6 +313,28 @@ describe('Compare quotes', () => {
     expect(text(html).match(/Make purchase order/g)).toHaveLength(1);
     expect(text(html)).toContain('Order PO-0004');
   });
+  it('shows no total for an RFQ whose answer has not been recorded, whatever prices were typed on it', () => {
+    const paper = { ...line, quantity: 10 };
+    const unanswered = renderToStaticMarkup(
+      <RfqCompareCard
+        rfqs={[
+          rfq('1', 'Kopi Hulu Supplies', { total: 120, lines: [{ ...paper, id: 'a1', description: 'A4 paper', unit_price: 12 }] }),
+          // The buyer typed 7.77 before sending: the view totals it, but the supplier has not answered.
+          rfq('2', 'Biji Segar', {
+            status: 'sent',
+            quoted_at: null,
+            total: 77.7,
+            lines: [{ ...paper, id: 'b1', description: 'A4 paper', unit_price: 7.77 }],
+          }),
+        ]}
+        onConverted={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(text(unanswered)).toContain('Total RM 120.00 Not quoted');
+    expect(text(unanswered)).not.toContain('77.70');
+    expect(text(unanswered)).not.toContain('7.77');
+  });
   it('shows a supplier’s own description under its price when it differs from the row’s', () => {
     const paper = { ...line, product_id: 'p1', quantity: 10 };
     const substituted = renderToStaticMarkup(
