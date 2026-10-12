@@ -108,7 +108,7 @@ export function RfqCompareCard({
             {rows.map((row) => (
               <TableRow key={row.key}>
                 {/* The row's header, drawn as the other cells are: a header cell is otherwise shorter and bold. */}
-                <TableHead scope="row" className="h-auto min-w-48 p-2 font-normal whitespace-normal align-top">
+                <TableHead scope="row" className="h-auto min-w-48 p-2 font-normal break-words whitespace-normal align-top">
                   <span className="font-medium">{row.description}</span>
                   {row.uom || row.pack_size ? (
                     <span className="block text-xs text-muted-foreground">{[row.uom, row.pack_size].filter(Boolean).join(' · ')}</span>
@@ -136,7 +136,7 @@ export function RfqCompareCard({
                     )}
                     {/* Matched by product but worded differently, as a substitute is: this supplier's own description. */}
                     {cell?.description ? (
-                      <span className="ml-auto block max-w-48 text-xs whitespace-normal">{cell.description}</span>
+                      <span className="ml-auto block max-w-48 text-xs break-words whitespace-normal">{cell.description}</span>
                     ) : null}
                   </TableCell>
                 ))}
