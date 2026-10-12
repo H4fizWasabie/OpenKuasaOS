@@ -86,11 +86,11 @@ describe('deleting a draft that RFQs were copied from', () => {
       '1 RFQ was copied from this one. Deleting it leaves that RFQ on its own: its quote can then be compared only with RFQs copied from it afterwards.',
     );
   });
-  it('says several copies can no longer be compared with each other, counting them in any status', () => {
+  it('says several copies cannot be compared with each other, counting them in any status', () => {
     const rows = [draft, copy('b'), copy('c', 'draft'), copy('d', 'closed'), ...unrelated];
     expect(rfqCopyCount(rows, draft)).toBe(3);
     expect(rfqDeleteWarning(rows, draft)).toBe(
-      '3 RFQs were copied from this one. Deleting it means their quotes can no longer be compared with each other.',
+      '3 RFQs were copied from this one. Deleting it means their quotes cannot be compared with each other.',
     );
   });
   it('says nothing when a copy is deleted: the rest of its group still name the first RFQ', () => {

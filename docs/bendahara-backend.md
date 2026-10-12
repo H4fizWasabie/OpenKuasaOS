@@ -2024,8 +2024,8 @@ with no date).
   price and no mark. `pcs` and `pc` are two rows as well; a capital or a
   stray space is not a difference.
 - Deleting the first RFQ of a group, which only a draft allows, clears the
-  link on its copies for good: they can no longer be compared with each
-  other. The delete question says so when RFQs were copied from the draft. A
+  link on its copies for good: they cannot be compared with each other
+  after that. The delete question says so when RFQs were copied from the draft. A
   copy made afterwards from one of them starts a new group of those two.
 - Viewers and the demo cannot open the comparison, although it only reads:
   `getRfqComparisonAction` answers a person who may edit, and the row menu it

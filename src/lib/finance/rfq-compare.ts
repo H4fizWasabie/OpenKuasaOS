@@ -45,7 +45,7 @@ export function rfqDeleteWarning(rows: RfqListRow[], row: Pick<RfqListRow, 'id'>
   if (copies === 1) {
     return '1 RFQ was copied from this one. Deleting it leaves that RFQ on its own: its quote can then be compared only with RFQs copied from it afterwards.';
   }
-  return `${copies} RFQs were copied from this one. Deleting it means their quotes can no longer be compared with each other.`;
+  return `${copies} RFQs were copied from this one. Deleting it means their quotes cannot be compared with each other.`;
 }
 
 /**
