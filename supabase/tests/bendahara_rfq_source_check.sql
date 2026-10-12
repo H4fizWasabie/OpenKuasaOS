@@ -1,5 +1,5 @@
 -- Bendahara RFQ source check. Run it after
--- 20261114090000_bendahara_rfq_source.sql, in the same transaction for a dry
+-- 20261115090000_bendahara_rfq_source.sql, in the same transaction for a dry
 -- run, or by itself once the migration is applied. It needs every finance
 -- migration before that one too. It covers the link a copied RFQ keeps to the
 -- first RFQ of its group; the rest of the RFQ flow is unchanged. It leaves
