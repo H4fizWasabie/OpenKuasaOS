@@ -8,6 +8,9 @@
 import { type ModelMessage, stepCountIs, streamText } from 'ai';
 import { logModelCall, logModelError } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
+// Each product's own assistant is told, on each call, which language the person's latest message is in (see the
+// file). Not Tuah, and not a specialist Tuah asks: their requests are as they were.
+import { inUsersLanguage } from '@/lib/ai/reply-language';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import { guardDeletions } from '@/lib/ai/hire-deletions';
@@ -79,7 +82,7 @@ export function runJebat(
 ) {
   const { tools, toolApproval } = boundToolkit([reachProduct(reach)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: JEBAT_SYSTEM,
     messages,
     tools,
@@ -111,7 +114,7 @@ export function runKasturi(
 ) {
   const { tools, toolApproval } = boundToolkit([crmProduct(crm), kasturiSharedProduct(reach)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: kasturiSystem(new Date()),
     messages,
     tools,
@@ -143,7 +146,7 @@ export function runLekir(
   // The gates for a deletion, a talent pool change and an interview change are put on in `boundToolkit`.
   const { tools, toolApproval } = boundToolkit([product], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: LEKIR_SYSTEM,
     messages,
     tools,
@@ -175,7 +178,7 @@ export function runLekiu(
 ) {
   const { tools, toolApproval } = boundToolkit([peopleProduct(people)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: lekiuSystem(new Date()),
     messages,
     tools,
@@ -206,7 +209,7 @@ export function runBendahara(
 ) {
   const { tools, toolApproval } = boundToolkit([financeProduct(finance)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: bendaharaSystem(new Date()),
     messages,
     tools,
@@ -225,7 +228,7 @@ const TEAM_AREA = {
   reach:
     'marketing: ads and campaigns, spend, leads (finding, adding and editing them, and promoting a lead to a CRM contact), lead forms, creatives, appointments and ad settings',
   crm: 'the CRM: contacts, deals, pipelines and their stages, follow-ups (reminders to get back to a contact), the calendar, and looking up sales invoices and what customers owe. A lead is not a contact yet: anything about a lead goes to Jebat',
-  hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Applications can be moved, rejected, reopened and rated, one at a time. Candidates can be added by hand and edited, one at a time. An application or a candidate can be deleted, one at a time. A candidate can be added to the talent pool, given a pool status, removed from the pool or moved to the pipeline for a job, one at a time. An interview can be scheduled, changed, cancelled, marked completed or a no-show, marked scheduled again, or recorded after it took place, one at a time. Existing staff, leave and payroll are not hiring. It can read one candidate\'s uploaded CV and give a verdict on it',
+  hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Applications can be moved, rejected, reopened and rated, one at a time. Candidates can be added by hand and edited, one at a time. An application or a candidate can be deleted, one at a time. A candidate can be added to the talent pool, given a pool status, removed from the pool or moved to the pipeline for a job, one at a time. An interview can be scheduled, changed, cancelled, marked completed or a no-show, marked scheduled again, or recorded after it took place, one at a time. Feedback on a completed interview (a rating out of 5, a recommendation and comments) can be recorded or cleared, one at a time. Existing staff, leave and payroll are not hiring. It can read one candidate\'s uploaded CV and give a verdict on it',
   people: 'HR: existing staff, leave, time-off, claims, overtime, attendance, payroll and performance. It looks these up (an owner or admin sees everyone; others see their own) and can prepare changes that wait for approval — deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time. Hiring new people is not HR',
   finance: 'finance: sales invoices and quotations, supplier bills, payments in and out, credit notes, refunds, customers and suppliers, items, and bank and cash accounts. It looks these up and can prepare changes that wait for approval — drafting, posting and voiding invoices and bills, recording payments, issuing credit notes and refunds, and managing customers, suppliers and items',
 } as const;
