@@ -232,7 +232,7 @@ describe('RFQ writes', () => {
     expect(logged).not.toHaveBeenCalled();
   });
   it('says the RFQ it was copied from is gone when a new copy is refused with FIN11, and nothing else', async () => {
-    const sentence = 'The RFQ this was copied from no longer exists. Save again to keep this one on its own.';
+    const sentence = 'The RFQ this was copied from can no longer be found. Save again to keep this one on its own.';
     const copy = { ...valid, source_rfq_id: ID };
     const refused = () => fakeFinance({ data: null, error: { code: 'FIN11' } }).ctx;
     expect(await saveRfq(refused(), copy)).toEqual({ ok: false, error: sentence });

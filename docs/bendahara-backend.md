@@ -1380,8 +1380,8 @@ the codes above, and `rfqs.ts` words them. `FIN11`: the RFQ a new RFQ names
 is not there to copy. It was deleted, or it is another workspace's, or the
 caller may not read it, or the new RFQ names itself; all are answered alike.
 On saving a new copy
-`rfqs.ts` says "The RFQ this was copied from no longer exists. Save again to
-keep this one on its own.", and the form drops the link; any other `FIN11`
+`rfqs.ts` says "The RFQ this was copied from can no longer be found. Save
+again to keep this one on its own.", and the form drops the link; any other `FIN11`
 on an RFQ stays "That RFQ no longer exists." `FIN01`: the link was changed
 after it was set, cleared by hand or pointed at the RFQ itself included.
 `rfqs.ts` has the RFQ's `FIN01` sentence for it, but no screen can reach it,

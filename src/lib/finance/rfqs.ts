@@ -46,7 +46,7 @@ export const RFQ_MESSAGES = {
   gone: 'That RFQ no longer exists.',
   // FIN11 on saving a new RFQ that was copied from another: the one it was copied from is not there to copy.
   // The form then lets go of the link (rfqFormAfterRefusal), so saving again saves this RFQ without it.
-  copiedFromGone: 'The RFQ this was copied from no longer exists. Save again to keep this one on its own.',
+  copiedFromGone: 'The RFQ this was copied from can no longer be found. Save again to keep this one on its own.',
   // FIN01. A menu offers only what an RFQ's status allows, so this reaches a person only when the RFQ
   // changed under them in another tab. It says what may have happened, not what did.
   locked:
