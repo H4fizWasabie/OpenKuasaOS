@@ -313,6 +313,27 @@ describe('Compare quotes', () => {
     expect(text(html).match(/Make purchase order/g)).toHaveLength(1);
     expect(text(html)).toContain('Order PO-0004');
   });
+  // The class list of the element that directly holds `inner`, and every header cell of the table with its scope.
+  const classesOf = (markup: string, inner: string) =>
+    markup.match(new RegExp(`<(?:th|span)[^>]*class="([^"]*)"[^>]*>${inner}<`))?.[1].split(' ') ?? [];
+  const headers = (markup: string, scope: string) =>
+    [...markup.matchAll(/<th ([^>]*)>([\s\S]*?)<\/th>/g)].filter(([, attrs]) => attrs.includes(`scope="${scope}"`)).map(([, , inner]) => text(inner));
+
+  it('is a named table whose columns and rows each have a header', () => {
+    expect(html).toMatch(/<table [^>]*aria-label="Quotes compared"/);
+    expect(headers(html, 'col')).toEqual(['Item', 'Kopi Hulu Supplies RFQ-1 · Quoted', 'Biji Segar RFQ-2 · Sent', 'Ladang Timur RFQ-3 · Quoted']);
+    expect(headers(html, 'row')).toEqual(['Arabica beans kg', 'Robusta beans kg', 'Total', 'Purchase order']);
+    // No header cell is left without a scope.
+    expect(html.match(/<th /g)).toHaveLength(8);
+  });
+  it('lets an item description and a supplier name wrap, an unbroken description too', () => {
+    const item = html.match(/<th [^>]*class="([^"]*)"[^>]*><span class="font-medium">Arabica beans</)?.[1].split(' ') ?? [];
+    expect(item).toEqual(expect.arrayContaining(['whitespace-normal', 'break-words']));
+    expect(item).not.toContain('whitespace-nowrap');
+    const supplier = classesOf(html, 'Kopi Hulu Supplies');
+    expect(supplier).toContain('whitespace-normal');
+    expect(supplier).not.toContain('whitespace-nowrap');
+  });
   it('shows no total for an RFQ whose answer has not been recorded, whatever prices were typed on it', () => {
     const paper = { ...line, quantity: 10 };
     const unanswered = renderToStaticMarkup(
@@ -349,5 +370,6 @@ describe('Compare quotes', () => {
     );
     expect(text(substituted).match(/A4 paper 80gsm/g)).toHaveLength(1);
     expect(text(substituted)).toContain('Lowest RM 9.00 Qty 10 · No SST · RM 90.00 A4 paper 70gsm (substitute)');
+    expect(classesOf(substituted, 'A4 paper 70gsm \\(substitute\\)')).toEqual(expect.arrayContaining(['whitespace-normal', 'break-words']));
   });
 });
