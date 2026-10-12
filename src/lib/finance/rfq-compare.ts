@@ -27,6 +27,28 @@ export function comparableRfqIds(rows: RfqListRow[]): Set<string> {
 }
 
 /**
+ * How many RFQs were copied from this one, in any status: those that name it as the first of their
+ * group. None for a copy, as a copy of a copy names the first RFQ and not the copy.
+ */
+export function rfqCopyCount(rows: RfqListRow[], row: Pick<RfqListRow, 'id'>): number {
+  return rows.filter((other) => other.source_rfq_id === row.id).length;
+}
+
+/**
+ * What deleting an RFQ costs its copies, for the question asked before a draft is deleted; null when
+ * nothing was copied from it. Deleting the first RFQ of a group clears the link on every copy for good:
+ * each is then a group of its own, which only copies made from it later can join.
+ */
+export function rfqDeleteWarning(rows: RfqListRow[], row: Pick<RfqListRow, 'id'>): string | null {
+  const copies = rfqCopyCount(rows, row);
+  if (copies === 0) return null;
+  if (copies === 1) {
+    return '1 RFQ was copied from this one. Deleting it leaves that RFQ on its own: its quote can then be compared only with RFQs copied from it afterwards.';
+  }
+  return `${copies} RFQs were copied from this one. Deleting it means their quotes can no longer be compared with each other.`;
+}
+
+/**
  * The RFQ a "Make purchase order" question in the comparison is about, as the group now reads; null
  * when nothing is being asked, or that RFQ has left the group or can no longer be made into an order.
  * The group is read again after a refused order, so a question whose RFQ got an order meanwhile goes.

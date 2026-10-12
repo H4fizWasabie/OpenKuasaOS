@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { comparableRfqIds, compareQuotes, orderableRfq, rfqGroupId } from '@/lib/finance/rfq-compare';
+import { comparableRfqIds, compareQuotes, orderableRfq, rfqCopyCount, rfqDeleteWarning, rfqGroupId } from '@/lib/finance/rfq-compare';
 import type { RfqDetail, RfqLine, RfqListRow } from '@/lib/finance/rfqs';
 
 const row = (id: string, over: Partial<RfqListRow> = {}): RfqListRow => ({
@@ -67,6 +67,37 @@ describe('RFQ groups', () => {
       row('e', { source_rfq_id: 'd', status: 'draft' }),
     ];
     expect([...comparableRfqIds(rows)].sort()).toEqual(['a', 'b']);
+  });
+});
+
+describe('deleting a draft that RFQs were copied from', () => {
+  const draft = row('a', { status: 'draft', rfq_no: null });
+  const copy = (id: string, status: RfqListRow['status'] = 'sent') => row(id, { source_rfq_id: 'a', status });
+  const unrelated = [row('x'), row('y', { source_rfq_id: 'x' })];
+
+  it('says nothing when nothing was copied from it', () => {
+    expect(rfqCopyCount([draft, ...unrelated], draft)).toBe(0);
+    expect(rfqDeleteWarning([draft, ...unrelated], draft)).toBeNull();
+  });
+  it('says the one copy will be on its own', () => {
+    const rows = [draft, copy('b'), ...unrelated];
+    expect(rfqCopyCount(rows, draft)).toBe(1);
+    expect(rfqDeleteWarning(rows, draft)).toBe(
+      '1 RFQ was copied from this one. Deleting it leaves that RFQ on its own: its quote can then be compared only with RFQs copied from it afterwards.',
+    );
+  });
+  it('says several copies can no longer be compared with each other, counting them in any status', () => {
+    const rows = [draft, copy('b'), copy('c', 'draft'), copy('d', 'closed'), ...unrelated];
+    expect(rfqCopyCount(rows, draft)).toBe(3);
+    expect(rfqDeleteWarning(rows, draft)).toBe(
+      '3 RFQs were copied from this one. Deleting it means their quotes can no longer be compared with each other.',
+    );
+  });
+  it('says nothing when a copy is deleted: the rest of its group still name the first RFQ', () => {
+    const b = copy('b', 'draft');
+    const rows = [draft, b, copy('c'), copy('d')];
+    expect(rfqCopyCount(rows, b)).toBe(0);
+    expect(rfqDeleteWarning(rows, b)).toBeNull();
   });
 });
 

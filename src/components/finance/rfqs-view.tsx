@@ -36,7 +36,7 @@ import {
   rfqsView,
 } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
-import { comparableRfqIds } from '@/lib/finance/rfq-compare';
+import { comparableRfqIds, rfqDeleteWarning } from '@/lib/finance/rfq-compare';
 import type { RfqDetail, RfqDisplayStatus, RfqListRow } from '@/lib/finance/rfqs';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { localIsoDate } from '@/lib/finance/bill-math';
@@ -225,6 +225,8 @@ export function RfqsView({
     const who = <span className="font-medium">{rfq.supplier_name}</span>;
     const number = <span className="font-medium">{rfq.rfq_no}</span>;
     const shared = { colSpan: columns, pending: confirm.pending, error: confirm.error, onCancel: close };
+    // Deleting the first RFQ of a group ends the comparison for its copies; the question says so.
+    const copiesWarning = rfqDeleteWarning(rows, rfq);
     switch (asking.kind) {
       case 'send':
         return (
@@ -290,7 +292,7 @@ export function RfqsView({
             pendingLabel="Deleting…"
             onConfirm={() => confirm.run(() => actions.remove(id), close)}
           >
-            Delete the draft RFQ to {who}? This cannot be undone.
+            Delete the draft RFQ to {who}? {copiesWarning ? `${copiesWarning} ` : ''}This cannot be undone.
           </ConfirmRow>
         );
     }
