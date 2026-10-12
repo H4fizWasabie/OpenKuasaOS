@@ -35,6 +35,12 @@ export type QuoteCell = {
   total: number | null;
   /** The lowest unit price on this line, SST included. Every supplier tied at the lowest is marked. */
   lowest: boolean;
+  /**
+   * This supplier's own description of the line, when it is not the row's: lines matched by product
+   * can be worded differently, and a substitute is told apart only by its description. null when it
+   * reads as the row's does.
+   */
+  description: string | null;
 };
 
 export type ComparisonRow = {
@@ -76,6 +82,7 @@ function unitCost(price: number, rate: number): bigint {
  * has, with one cell per RFQ. Only an RFQ whose answer was recorded (`quoted_at`) has prices here: the
  * form lets a buyer type a price before sending, and that is not the supplier's. The lowest price on a
  * line is marked only when at least two suppliers priced it: a price nobody else gave is not a comparison.
+ * A row goes by the description on the first RFQ that has it; a cell worded differently keeps its own.
  */
 export function compareQuotes(rfqs: RfqDetail[]): ComparisonRow[] {
   const rows = new Map<string, ComparisonRow>();
@@ -93,7 +100,8 @@ export function compareQuotes(rfqs: RfqDetail[]): ComparisonRow[] {
         const { amount, sst } = lineAmounts({ quantity: line.quantity, unit_price, sst_rate: line.sst_rate });
         total = Math.round((amount + sst) * 100) / 100;
       }
-      row.cells[column] = { quantity: line.quantity, unit_price, sst_rate: line.sst_rate, total, lowest: false };
+      const description = words(line.description) === words(row.description) ? null : line.description;
+      row.cells[column] = { quantity: line.quantity, unit_price, sst_rate: line.sst_rate, total, lowest: false, description };
     });
   });
 

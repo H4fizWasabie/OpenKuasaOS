@@ -95,6 +95,10 @@ export function RfqCompareCard({
                         </span>
                       </>
                     )}
+                    {/* Matched by product but worded differently, as a substitute is: this supplier's own description. */}
+                    {cell?.description ? (
+                      <span className="ml-auto block max-w-48 text-xs whitespace-normal">{cell.description}</span>
+                    ) : null}
                   </TableCell>
                 ))}
               </TableRow>

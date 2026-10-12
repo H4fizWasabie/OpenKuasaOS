@@ -123,6 +123,20 @@ describe('compareQuotes', () => {
       ]),
     ).toEqual(['A4 paper 80gsm: 12, 11*', 'Staples: 3*, 4', 'Envelopes: 5, x', 'Envelopes: x, 2']);
   });
+  it('keeps a cell’s own description when lines matched by product are worded differently, so a substitute shows', () => {
+    const [paper, ...rest] = compareQuotes([
+      rfq('a', [line('A4 paper 80gsm', 12, { product_id: 'p1' })]),
+      rfq('b', [line('A4 paper 70gsm (substitute)', 9, { product_id: 'p1' })]),
+      rfq('c', [line('  a4 PAPER  80gsm ', 10, { product_id: 'p1' })]),
+      rfq('d', [line('A4 paper 75gsm', 11, { product_id: 'p1' })], { status: 'sent', quoted_at: null }),
+    ]);
+    expect(rest).toEqual([]);
+    // The row goes by the first description; the price comparison is unchanged.
+    expect(paper.description).toBe('A4 paper 80gsm');
+    expect(paper.cells.map((c) => c?.lowest)).toEqual([false, true, false, false]);
+    // A space or a capital is not a different description; an RFQ with no recorded answer still says what it asks for.
+    expect(paper.cells.map((c) => c?.description)).toEqual([null, 'A4 paper 70gsm (substitute)', null, 'A4 paper 75gsm']);
+  });
   it('keeps two lines for the same item on one RFQ as two rows, matched in the order entered', () => {
     expect(
       grid([rfq('a', [line('Paper', 12), line('Paper', 10)]), rfq('b', [line('Paper', 11), line('Paper', 9)])]),

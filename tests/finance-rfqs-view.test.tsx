@@ -313,4 +313,19 @@ describe('Compare quotes', () => {
     expect(text(html).match(/Make purchase order/g)).toHaveLength(1);
     expect(text(html)).toContain('Order PO-0004');
   });
+  it('shows a supplier’s own description under its price when it differs from the row’s', () => {
+    const paper = { ...line, product_id: 'p1', quantity: 10 };
+    const substituted = renderToStaticMarkup(
+      <RfqCompareCard
+        rfqs={[
+          rfq('1', 'Kopi Hulu Supplies', { lines: [{ ...paper, id: 'a1', description: 'A4 paper 80gsm', unit_price: 12 }] }),
+          rfq('2', 'Biji Segar', { lines: [{ ...paper, id: 'b1', description: 'A4 paper 70gsm (substitute)', unit_price: 9 }] }),
+        ]}
+        onConverted={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(text(substituted).match(/A4 paper 80gsm/g)).toHaveLength(1);
+    expect(text(substituted)).toContain('Lowest RM 9.00 Qty 10 · No SST · RM 90.00 A4 paper 70gsm (substitute)');
+  });
 });
