@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BadgeCheck, ClipboardCheck, Scale } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -28,6 +28,10 @@ function unitPrice(n: number) {
  * keeps focus, Escape and Cancel take the question away and hand focus back to the button that asked it,
  * and after a refusal the group is read again (`reload`), so a column that can no longer be ordered
  * stops offering it.
+ *
+ * When the card appears its title takes focus, not Close: Close is the last thing in the card, and
+ * focusing it scrolled the page down past the supplier names. From the title, Tab reaches the table's
+ * buttons and then Close, in order.
  */
 export function RfqCompareCard({
   rfqs,
@@ -53,19 +57,33 @@ export function RfqCompareCard({
   const asked = orderableRfq(rfqs, confirming?.id ?? null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const closeButton = useRef<HTMLButtonElement | null>(null);
+  const heading = useRef<HTMLSpanElement | null>(null);
+  // A plain focus, so the top of the card is brought into view and the card is read from its title.
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
   const cancel = () => {
+    // The refusal belonged to the question, so it goes with it, as ConfirmRow's does.
+    action.clear();
     setConfirming(null);
     opener.current?.focus();
   };
   // A question whose RFQ can no longer be ordered goes, and its buttons with it: focus goes to Close, not to the page.
+  // Before the browser paints, so focus does not rest on the page in between. The refusal is the line above Close,
+  // so scrolling Close into view keeps it in view too.
   const dropped = confirming !== null && asked === null;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (dropped && !action.pending) closeButton.current?.focus();
   }, [dropped, action.pending]);
 
   return (
     <BentoCard
-      title="Compare quotes"
+      // The row menu hands focus to `data-finance-focus`; here that is the title, so the card opens at its top.
+      title={
+        <span ref={heading} tabIndex={-1} data-finance-focus>
+          Compare quotes
+        </span>
+      }
       subtitle={`${rfqs.length} suppliers asked for the same items`}
       icon={Scale}
       flush
@@ -227,7 +245,7 @@ export function RfqCompareCard({
             Lowest is the lowest price for one unit once SST is added. The lowest price is not always the best choice:
             delivery time and past service count too.
           </p>
-          <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={action.pending} autoFocus data-finance-focus ref={closeButton}>
+          <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={action.pending} ref={closeButton}>
             Close
           </Button>
         </div>
