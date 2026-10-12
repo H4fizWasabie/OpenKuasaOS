@@ -1,4 +1,5 @@
 import type { AccountStandsFor, AccountType, JournalRow, LedgerAccount, LedgerLine } from '@/lib/finance/ledger';
+import type { OpenDocument } from '@/lib/finance/reports';
 import { round2 } from '@/lib/finance/view-helpers';
 
 /**
@@ -15,6 +16,7 @@ const BASE_ACCOUNTS: SampleAccount[] = [
   { id: 'acc-1200', code: '1200', name: 'Trade Receivables', type: 'asset', stands_for: 'system' },
   { id: 'acc-1500', code: '1500', name: 'Accumulated Depreciation', type: 'asset', stands_for: 'own' },
   { id: 'acc-2000', code: '2000', name: 'Trade Payables', type: 'liability', stands_for: 'system' },
+  { id: 'acc-2050', code: '2050', name: 'Accrued Expenses', type: 'liability', stands_for: 'system' },
   { id: 'acc-2100', code: '2100', name: 'SST Payable', type: 'liability', stands_for: 'system' },
   { id: 'acc-3000', code: '3000', name: 'Owner’s Capital', type: 'equity', stands_for: 'system' },
   { id: 'acc-4000', code: '4000', name: 'Sales', type: 'income', stands_for: 'system' },
@@ -42,8 +44,8 @@ function entry(
 }
 
 /**
- * Eleven entries over four months (July to October 2026): an opening balance, three invoices, two bills, a
- * receipt, a payment, an expense, a manual journal and a second receipt, so the Reports screen has months to compare.
+ * Twelve entries over four months (July to October 2026): an opening balance, three invoices, two bills, a
+ * receipt, a payment, an expense (accrued) and its payment, a manual journal and a second receipt, so the Reports screen has months to compare.
  */
 export const SAMPLE_LEDGER_LINES: LedgerLine[] = [
   ...entry('opening:bank-1100', '2026-07-01', 'opening', 'bank-1100', null, 'Opening balance of Main Bank', [
@@ -74,6 +76,10 @@ export const SAMPLE_LEDGER_LINES: LedgerLine[] = [
   ]),
   ...entry('expense:exp-1', '2026-10-01', 'expense', 'exp-1', 'EXP-0001', 'October office rent', [
     { account_id: 'acc-6100', debit: 1_200, credit: 0 },
+    { account_id: 'acc-2050', debit: 0, credit: 1_200 },
+  ]),
+  ...entry('payment_out:pay-2', '2026-10-01', 'payment_out', 'pay-2', 'PAY-0002', 'Payment of EXP-0001', [
+    { account_id: 'acc-2050', debit: 1_200, credit: 0 },
     { account_id: 'acc-1100', debit: 0, credit: 1_200 },
   ]),
   ...entry('payment_out:pay-1', '2026-10-02', 'payment_out', 'pay-1', 'PAY-0001', 'Payment to Kopi Hulu Supplies', [
@@ -93,6 +99,18 @@ export const SAMPLE_LEDGER_LINES: LedgerLine[] = [
     { account_id: 'acc-1100', debit: 3_180, credit: 0 },
     { account_id: 'acc-1200', debit: 0, credit: 3_180 },
   ]),
+];
+
+/**
+ * What the sample books above still owe, for the aged tables on Reports: INV-0003 is the 4,240.00 left on
+ * Trade Receivables, and the two bills are the 1,050.00 left on Trade Payables (BILL-0001 less its 800.00 payment, and BILL-0002).
+ */
+export const SAMPLE_RECEIVABLES: OpenDocument[] = [
+  { party_id: 'sample-customer-aisyah', party_name: 'Aisyah Trading', due_date: '2026-11-07', balance: 4_240 },
+];
+export const SAMPLE_PAYABLES: OpenDocument[] = [
+  { party_id: 'sample-supplier-kopi-hulu', party_name: 'Kopi Hulu Supplies', due_date: '2026-09-04', balance: 700 },
+  { party_id: 'sample-supplier-tenaga', party_name: 'Tenaga Utilities', due_date: '2026-10-25', balance: 350 },
 ];
 
 /** The sample accounts, each with the totals of its own lines (a debit-normal account reads debit less credit). */

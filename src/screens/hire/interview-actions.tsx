@@ -1,8 +1,8 @@
 'use client';
 
-import { Fragment, useRef, useState, useTransition } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertDialog } from 'radix-ui';
+import { AlertDialog, Popover } from 'radix-ui';
 import { MoreHorizontal, Plus } from 'lucide-react';
 import {
   cancelInterviewAction, clearInterviewFeedbackAction, getInterviewInvitationAction, reopenInterviewAction, setInterviewOutcomeAction,
@@ -38,6 +38,9 @@ const TARGET = 'min-h-11 min-w-11';
 const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
 const WAITING = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:translate-y-0';
 const ALERT_CLASS = 'rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive';
+// The refusal at a row: an opaque card (the tint sits on an inner layer) of a readable, fixed width that never exceeds the viewport.
+const REFUSAL_CLASS =
+  'z-50 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-destructive/30 bg-background text-left text-sm whitespace-normal text-destructive shadow-md outline-none';
 const OVERLAY_CLASS = 'fixed inset-0 z-50 bg-black/40';
 const CONTENT_CLASS =
   'fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-5 shadow-lg outline-none max-h-[85vh] overflow-y-auto';
@@ -171,7 +174,9 @@ function useInterviewChange() {
   };
   /** A refusal known without asking the server: said at the row like any other, and the newest thing said on the screen. */
   const refuse = (text: string) => setRefusal({ text, seq: claimResult() });
-  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, ask, refuse, clearError: () => setRefusal(null) };
+  /** Stable, so an effect that holds it is not set up again on every render. */
+  const clearError = useCallback(() => setRefusal(null), []);
+  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, ask, refuse, clearError };
 }
 
 /**
@@ -212,6 +217,25 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
   const triggerId = openerId('row', row.id);
   const groups = rowMenuWithFeedback(row);
   const waiting = change.pending || undefined;
+  /** The refusal card is up (the cancel and clear-feedback confirms show the refusal themselves). */
+  const showing = Boolean(change.error && panel === null);
+  const card = useRef<HTMLDivElement>(null);
+  const { clearError } = change;
+  // A press anywhere outside the card clears it. Radix's own outside-press check stops counting once another row's menu
+  // (a modal layer) is open above it, so this does not lean on that. Capture phase, never prevented or stopped: the press
+  // still reaches what was pressed. Added after a tick, so the gesture that raised the refusal cannot dismiss it.
+  useEffect(() => {
+    if (!showing) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && card.current?.contains(event.target)) return;
+      clearError();
+    };
+    const timer = window.setTimeout(() => document.addEventListener('pointerdown', onDown, true), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', onDown, true);
+    };
+  }, [showing, clearError]);
 
   const choose = (item: RowMenuItem) => {
     if (item === 'reopen') {
@@ -231,6 +255,20 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
+      {/*
+        The refusal is drawn in a portal, anchored to the menu button: the Actions cell is narrow and the table's scroll wrapper
+        clips anything laid over it, so in the cell the sentence collapsed to one word per line. Open exactly while the error
+        shows at the row; it never takes focus. Escape and a press outside clear it through `clearError`.
+      */}
+      <Popover.Root
+        open={showing}
+        // Escape or a press outside the card: the same clearing as everywhere else. The press itself is not stopped, so it still reaches what was pressed.
+        onOpenChange={(next) => {
+          if (!next) change.clearError();
+        }}
+      >
+      <Popover.Anchor asChild>
+      <span className="inline-flex">
       <DropdownMenu
         open={open}
         onOpenChange={(next) => {
@@ -305,14 +343,31 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      </span>
+      </Popover.Anchor>
+      <Popover.Portal>
+        <Popover.Content
+          ref={card}
+          role="alert"
+          side="bottom"
+          align="end"
+          sideOffset={4}
+          collisionPadding={16}
+          className={REFUSAL_CLASS}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          // Focus moving elsewhere does not dismiss: closing the menu hands focus back to the "…" button just as a refusal appears, and that would clear it at once.
+          onFocusOutside={(event) => event.preventDefault()}
+        >
+          <div className="rounded-lg bg-destructive/10 px-3 py-2">{change.error}</div>
+        </Popover.Content>
+      </Popover.Portal>
+      </Popover.Root>
       {/* Always in the page, so "Saving…" and "Getting the invitation…" are announced. It takes a line only while there is something to say. */}
       <p aria-live="polite" className={cn(HELP, !rowWaitingWord(change.pending, handover) && 'sr-only')}>
         {rowWaitingWord(change.pending, handover)}
       </p>
-      {/* While the cancel confirm is open the refusal is shown inside it. */}
-      {change.error && panel === null ? (
-        <p role="alert" className={cn(ALERT_CLASS, 'max-w-xs text-left whitespace-normal')}>{change.error}</p>
-      ) : null}
+      {/* While the cancel confirm is open the refusal is shown inside it; otherwise it is the popover above. */}
 
       {/* "Cancel the interview with Aina Rahman?" Focus starts on "Keep interview", so Enter on a freshly opened dialog cancels nothing. A click outside does not close it. */}
       <AlertDialog.Root

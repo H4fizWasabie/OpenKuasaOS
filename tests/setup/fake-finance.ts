@@ -62,9 +62,17 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
           call.filters[`${column} is`] = value;
           return builder;
         },
-        // Recorded under "<column> neq", so a test can tell it from `eq`.
+        // Recorded under "column op", so a test reads them beside the plain eq filters.
         neq(column: string, value: unknown) {
           call.filters[`${column} neq`] = value;
+          return builder;
+        },
+        gt(column: string, value: unknown) {
+          call.filters[`${column} gt`] = value;
+          return builder;
+        },
+        in(column: string, values: unknown[]) {
+          call.filters[`${column} in`] = values;
           return builder;
         },
         // Recorded under "or", in PostgREST's own words.
