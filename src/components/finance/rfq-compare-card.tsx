@@ -51,12 +51,12 @@ export function RfqCompareCard({
       className="col-span-2 md:col-span-12"
     >
       <div className="overflow-x-auto">
-        <Table>
+        <Table aria-label="Quotes compared">
           <TableHeader>
             <TableRow className="bg-muted/40">
-              <TableHead>Item</TableHead>
+              <TableHead scope="col">Item</TableHead>
               {rfqs.map((r) => (
-                <TableHead key={r.id} className="text-right align-bottom">
+                <TableHead key={r.id} scope="col" className="text-right align-bottom">
                   <span className="block whitespace-normal font-medium text-foreground">{r.supplier_name}</span>
                   <span className="block whitespace-nowrap text-xs font-normal">
                     {r.rfq_no} · {RFQ_STATUS_LABELS[r.status]}
@@ -68,12 +68,13 @@ export function RfqCompareCard({
           <TableBody>
             {rows.map((row) => (
               <TableRow key={row.key}>
-                <TableCell className="min-w-48 whitespace-normal align-top">
+                {/* The row's header, drawn as the other cells are: a header cell is otherwise shorter and bold. */}
+                <TableHead scope="row" className="h-auto min-w-48 p-2 font-normal whitespace-normal align-top">
                   <span className="font-medium">{row.description}</span>
                   {row.uom || row.pack_size ? (
                     <span className="block text-xs text-muted-foreground">{[row.uom, row.pack_size].filter(Boolean).join(' · ')}</span>
                   ) : null}
-                </TableCell>
+                </TableHead>
                 {row.cells.map((cell, i) => (
                   <TableCell key={rfqs[i].id} className="whitespace-nowrap text-right align-top tabular-nums">
                     {cell === null || cell.unit_price === null || cell.total === null ? (
