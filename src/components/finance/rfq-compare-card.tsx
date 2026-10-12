@@ -143,7 +143,9 @@ export function RfqCompareCard({
               </TableRow>
             ))}
             <TableRow className="bg-muted/40 font-medium">
-              <TableCell>Total</TableCell>
+              <TableHead scope="row" className="h-auto p-2">
+                Total
+              </TableHead>
               {rfqs.map((r) => (
                 <TableCell key={r.id} className="whitespace-nowrap text-right tabular-nums">
                   {r.quoted_at ? rm(r.total) : <span className="font-normal text-muted-foreground">Not quoted</span>}
@@ -151,9 +153,9 @@ export function RfqCompareCard({
               ))}
             </TableRow>
             <TableRow>
-              <TableCell>
+              <TableHead scope="row" className="h-auto p-2">
                 <span className="sr-only">Purchase order</span>
-              </TableCell>
+              </TableHead>
               {rfqs.map((r) => (
                 <TableCell key={r.id} className="whitespace-nowrap text-right">
                   {convert && rfqActions(r).includes('convert') ? (
