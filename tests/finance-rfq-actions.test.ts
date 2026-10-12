@@ -17,6 +17,8 @@ const ctl = vi.hoisted(() => ({
   answers: {} as Record<string, unknown>,
   /** What getRfq returns, or an Error for it to throw. */
   rfq: null as unknown,
+  /** What getRfqGroup returns, or an Error for it to throw. */
+  group: [] as unknown,
 }));
 
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => ctl.viewer }));
@@ -48,6 +50,11 @@ vi.mock('@/lib/finance/rfqs', async (orig) => {
       ctl.calls.push({ fn: 'getRfq', orgId: ctx.orgId, input: id });
       if (ctl.rfq instanceof Error) throw ctl.rfq;
       return ctl.rfq;
+    },
+    getRfqGroup: async (ctx: { orgId: string }, id: string) => {
+      ctl.calls.push({ fn: 'getRfqGroup', orgId: ctx.orgId, input: id });
+      if (ctl.group instanceof Error) throw ctl.group;
+      return ctl.group;
     },
   };
 });
@@ -83,6 +90,7 @@ beforeEach(() => {
   ctl.revalidated = [];
   ctl.answers = {};
   ctl.rfq = null;
+  ctl.group = [];
 });
 
 describe('who may write', () => {
@@ -350,6 +358,54 @@ describe('getRfqForCopyAction', () => {
       ctl.viewer = viewer;
       expect(await actions.getRfqForCopyAction({ id: RFQ }), JSON.stringify(viewer)).toEqual(FORBIDDEN);
       expect(await actions.getRfqForCopyAction({ id: 'nope' }), JSON.stringify(viewer)).toEqual(FORBIDDEN);
+    }
+    expect(ctl.calls).toEqual([]);
+  });
+});
+
+describe('getRfqComparisonAction', () => {
+  const quoted = { id: RFQ, status: 'quoted', lines: [] };
+  const sent = { id: SUPPLIER, status: 'sent', lines: [] };
+
+  it('returns the group, without refreshing anything', async () => {
+    ctl.group = [quoted, sent];
+    expect(await actions.getRfqComparisonAction({ id: RFQ })).toEqual({ ok: true, data: [quoted, sent] });
+    expect(ctl.calls).toEqual([{ fn: 'getRfqGroup', orgId: 'org1', input: RFQ }]);
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('says there is nothing to compare, and refreshes the list, when the group came apart meanwhile', async () => {
+    ctl.group = [quoted];
+    expect(await actions.getRfqComparisonAction({ id: RFQ })).toEqual({
+      ok: false,
+      error: 'There are no other quotes for this request to compare it with.',
+    });
+    expect(ctl.revalidated).toEqual(RFQS);
+  });
+
+  it('says the RFQ is gone when it is not there, and for an id that is not an id', async () => {
+    expect(await actions.getRfqComparisonAction({ id: RFQ })).toEqual(GONE);
+    ctl.calls = [];
+    expect(await actions.getRfqComparisonAction({ id: 'nope' })).toEqual(GONE);
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('answers with a sentence when the read fails, and logs the cause', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.group = new Error('connection reset');
+    expect(await actions.getRfqComparisonAction({ id: RFQ })).toEqual({ ok: false, error: 'That could not be loaded. Please try again.' });
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
+  it('tells a viewer and the demo they may not, without reading', async () => {
+    ctl.group = [quoted, sent];
+    for (const viewer of [
+      { userId: 'u1', orgId: 'org1', role: 'viewer', isDemo: false },
+      { userId: 'u1', orgId: 'org1', role: 'owner', isDemo: true },
+    ]) {
+      ctl.viewer = viewer;
+      expect(await actions.getRfqComparisonAction({ id: RFQ }), JSON.stringify(viewer)).toEqual(FORBIDDEN);
     }
     expect(ctl.calls).toEqual([]);
   });

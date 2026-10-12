@@ -52,8 +52,8 @@ describe('a saved draft, as the form shows it', () => {
   it('shows a missing price as an empty box and a price of 0 as 0', () => {
     const detail: RfqDetail = {
       id: RFQ, rfq_no: null, supplier_id: SUPPLIER, supplier_name: 'Syarikat Kertas', rfq_date: '2026-10-01', reply_by: null,
-      supplier_ref: null, status: 'draft', line_count: 2, total: 0, fully_priced: false, purchase_order_id: null, purchase_order_no: null,
-      subtotal: 0, sst_total: 0, notes: null,
+      supplier_ref: null, status: 'draft', line_count: 2, total: 0, fully_priced: false, purchase_order_id: null, purchase_order_no: null, source_rfq_id: null,
+      subtotal: 0, sst_total: 0, notes: null, quoted_at: null,
       lines: [
         { id: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: 5, uom: 'ream', pack_size: 'box of 5', unit_price: null, sst_rate: 6 },
         { id: LINE_2, product_id: null, description: 'Sample', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0 },
@@ -72,8 +72,8 @@ describe('a saved draft, as the form shows it', () => {
 describe('a copy of an RFQ, for another supplier', () => {
   const priced: RfqDetail = {
     id: RFQ, rfq_no: 'RFQ-0004', supplier_id: SUPPLIER, supplier_name: 'Syarikat Kertas', rfq_date: '2026-09-01', reply_by: '2026-09-15',
-    supplier_ref: 'Q-77', status: 'quoted', line_count: 2, total: 130, fully_priced: true, purchase_order_id: 'po-1', purchase_order_no: 'PO-0003',
-    subtotal: 125, sst_total: 5, notes: 'Deliver to the back door',
+    supplier_ref: 'Q-77', status: 'quoted', line_count: 2, total: 130, fully_priced: true, purchase_order_id: 'po-1', purchase_order_no: 'PO-0003', source_rfq_id: null,
+    subtotal: 125, sst_total: 5, notes: 'Deliver to the back door', quoted_at: '2026-10-02T09:00:00Z',
     lines: [
       { id: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: 5, uom: 'ream', pack_size: 'box of 5', unit_price: 24.9, sst_rate: 6 },
       { id: LINE_2, product_id: null, description: 'Sample', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0 },
@@ -105,6 +105,12 @@ describe('a copy of an RFQ, for another supplier', () => {
     const chosen = RFQ_FORM_KIND.withParty(form, { id: SUPPLIER, payment_terms_days: 30 });
     expect(rfqFormError(chosen)).toBeNull();
     expect(rfqPayload(chosen)).not.toHaveProperty('id');
+  });
+  it('remembers the RFQ it was copied from, and sends it with the new draft', () => {
+    const chosen = RFQ_FORM_KIND.withParty(rfqFormCopiedFrom(priced, today), { id: SUPPLIER, payment_terms_days: 30 });
+    expect(rfqPayload(chosen)).toMatchObject({ source_rfq_id: priced.id });
+    expect(saveRfqInput.parse(rfqPayload(chosen)).source_rfq_id).toBe(priced.id);
+    expect(rfqPayload(filled())).not.toHaveProperty('source_rfq_id');
   });
   it('leaves the RFQ it was copied from unchanged', () => {
     const before = JSON.stringify(priced);

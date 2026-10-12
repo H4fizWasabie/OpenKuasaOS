@@ -124,6 +124,7 @@ import {
   convertRfq,
   deleteRfq,
   getRfq,
+  getRfqGroup,
   quoteRfq,
   quoteRfqInput,
   rfqIdInput,
@@ -587,6 +588,27 @@ export async function getSentRfqAction(input: unknown): Promise<FinResult<RfqDet
  */
 export async function getRfqForCopyAction(input: unknown): Promise<FinResult<RfqDetail>> {
   return documentInStatus(RFQ_PATHS, rfqIdInput, input, getRfq, RFQ_MESSAGES, 'RFQ', null);
+}
+
+/**
+ * Every RFQ of one RFQ's group that has gone to its supplier, with its lines, for Compare quotes. Nothing
+ * is changed. Fewer than two means the group came apart since the page loaded (its first RFQ was a draft,
+ * and was deleted), so there is nothing to compare: the page is refreshed and its menu stops offering it.
+ */
+export async function getRfqComparisonAction(input: unknown): Promise<FinResult<RfqDetail[]>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = rfqIdInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: RFQ_MESSAGES.gone };
+  try {
+    const group = await getRfqGroup(ctx, parsed.data.id);
+    if (group.length >= 2) return { ok: true, data: group };
+    refresh(RFQ_PATHS);
+    return { ok: false, error: group.length ? RFQ_MESSAGES.nothingToCompare : RFQ_MESSAGES.gone };
+  } catch (error) {
+    console.error('[finance] an RFQ comparison could not be read:', error);
+    return { ok: false, error: READ_FAILED };
+  }
 }
 
 /** Makes a draft purchase order from a quoted RFQ, and refreshes Purchase Orders as well. */

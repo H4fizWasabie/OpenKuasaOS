@@ -416,6 +416,7 @@ const rfq = (r: Partial<RfqListRow>): RfqListRow => {
     fully_priced: false,
     purchase_order_id: null,
     purchase_order_no: null,
+    source_rfq_id: null,
     ...r,
   };
 };

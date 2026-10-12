@@ -26,6 +26,8 @@ import { RFQ_MESSAGES, type RfqDetail, quoteRfqInput, saveRfqInput } from './rfq
 export type RfqForm = {
   /** Present when a saved draft is being changed. */
   id?: string;
+  /** Present on a new RFQ copied from a saved one: the RFQ it was copied from. */
+  source_rfq_id?: string;
   supplier_id: string;
   rfq_date: string;
   /** Empty when the RFQ names no date to reply by. */
@@ -63,10 +65,13 @@ export function rfqFormFromDetail(rfq: RfqDetail): RfqForm {
 /**
  * A new RFQ made from a saved one, to ask another supplier the same thing: no id, so saving makes a new
  * draft; no supplier; dated today with no reply-by date; the same notes and lines, every price box empty
- * (the first supplier's prices are not the next one's). The lines get keys of their own.
+ * (the first supplier's prices are not the next one's). The lines get keys of their own. It remembers
+ * the RFQ it came from, so the quotes can be compared; the database follows a copy of a copy back to
+ * the first RFQ.
  */
 export function rfqFormCopiedFrom(rfq: RfqDetail, today: string): RfqForm {
   return {
+    source_rfq_id: rfq.id,
     supplier_id: '',
     rfq_date: today,
     reply_by: '',
@@ -115,6 +120,7 @@ function typedPrice(text: string): number | null {
 export function rfqPayload(form: RfqForm) {
   return {
     ...(form.id ? { id: form.id } : {}),
+    ...(form.source_rfq_id ? { source_rfq_id: form.source_rfq_id } : {}),
     supplier_id: form.supplier_id,
     rfq_date: form.rfq_date,
     reply_by: form.reply_by,

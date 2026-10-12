@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { FinanceContact } from '@/lib/finance/contacts';
+import { RfqCompareCard } from '@/components/finance/rfq-compare-card';
 import { RfqFormCard } from '@/components/finance/rfq-form-card';
 import { RfqPricesCard } from '@/components/finance/rfq-prices-card';
 import { type RfqActions, RfqsView } from '@/components/finance/rfqs-view';
@@ -62,6 +63,7 @@ const row = (over: Partial<RfqListRow> = {}): RfqListRow => ({
   fully_priced: false,
   purchase_order_id: null,
   purchase_order_no: null,
+  source_rfq_id: null,
   ...over,
 });
 
@@ -77,6 +79,7 @@ const actions: RfqActions = {
   get: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getSent: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getForCopy: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
+  getComparison: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
 };
 const writer = { actions, suppliers: [], products: [] };
 
@@ -132,6 +135,18 @@ describe('the RFQs list', () => {
     expect(priced).toContain('PO-0007');
   });
 
+  it('offers Compare quotes on an RFQ that went out with a copy to another supplier, and not on a draft copy', () => {
+    const first = row({ id: 'first', status: 'quoted', fully_priced: true });
+    const copy = row({ id: 'copy', rfq_no: 'RFQ-0002', status: 'sent', source_rfq_id: 'first' });
+    const draft = row({ id: 'draft', rfq_no: null, status: 'draft', source_rfq_id: 'first' });
+    expect(items(render([first, copy]))).toEqual([
+      'Make purchase order', 'Compare quotes', 'Copy to another supplier', 'Close RFQ',
+      'Record prices', 'Compare quotes', 'Copy to another supplier', 'Close RFQ',
+    ]);
+    // A draft copy has asked nobody yet: the first RFQ alone has nothing to be compared with.
+    expect(items(render([first, draft]))).not.toContain('Compare quotes');
+  });
+
   it('gives a reader no New button and no menu', () => {
     const html = render([row({ status: 'draft', rfq_no: null })], false);
     expect(text(html)).not.toContain('New RFQ');
@@ -148,6 +163,7 @@ describe('the RFQ form', () => {
     subtotal: 0,
     sst_total: 0,
     notes: null,
+    quoted_at: null,
     lines: [],
   };
 
@@ -174,6 +190,7 @@ describe('a copied RFQ form', () => {
     subtotal: 100,
     sst_total: 6,
     notes: 'Deliver before noon',
+    quoted_at: '2026-10-02T09:00:00Z',
     lines: [
       { id: 'l1', product_id: null, description: 'Arabica beans', quantity: 20, uom: 'kg', pack_size: null, unit_price: 5, sst_rate: 6 },
     ],
@@ -210,6 +227,7 @@ describe('the prices card', () => {
     subtotal: 0,
     sst_total: 0,
     notes: null,
+    quoted_at: null,
     lines: [
       { id: '11111111-1111-4111-8111-1111111111a1', product_id: null, description: 'Arabica beans', quantity: 5, uom: 'kg', pack_size: null, unit_price: null, sst_rate: 0 },
       { id: '11111111-1111-4111-8111-1111111111a2', product_id: null, description: 'Paper cups', quantity: 200, uom: 'pcs', pack_size: null, unit_price: null, sst_rate: 6 },
@@ -239,5 +257,60 @@ describe('the prices card', () => {
     const result = submitPrices(sent.id, 'Q-77', drafts);
     expect(result).not.toHaveProperty('error');
     expect(result).toEqual({ payload: quotePayload(sent.id, 'Q-77', drafts) });
+  });
+});
+
+describe('Compare quotes', () => {
+  const rfq = (id: string, supplier_name: string, over: Partial<RfqDetail>): RfqDetail => ({
+    ...row({ id, rfq_no: `RFQ-${id}`, supplier_name, status: 'quoted', fully_priced: true }),
+    subtotal: 0,
+    sst_total: 0,
+    notes: null,
+    quoted_at: '2026-10-02T09:00:00Z',
+    lines: [],
+    ...over,
+  });
+  const line = { product_id: null, uom: 'kg', pack_size: null, sst_rate: 0 };
+  const group = [
+    rfq('1', 'Kopi Hulu Supplies', {
+      total: 100,
+      lines: [
+        { ...line, id: 'a1', description: 'Arabica beans', quantity: 20, unit_price: 5 },
+        { ...line, id: 'a2', description: 'Robusta beans', quantity: 10, unit_price: 3 },
+      ],
+    }),
+    rfq('2', 'Biji Segar', {
+      status: 'sent',
+      fully_priced: false,
+      quoted_at: null,
+      lines: [
+        { ...line, id: 'b1', description: 'Arabica beans', quantity: 20, unit_price: null },
+        { ...line, id: 'b2', description: 'Robusta beans', quantity: 10, unit_price: null },
+      ],
+    }),
+    rfq('3', 'Ladang Timur', {
+      total: 100,
+      purchase_order_id: 'po-1',
+      purchase_order_no: 'PO-0004',
+      lines: [{ ...line, id: 'c1', description: 'Arabica beans', quantity: 20, unit_price: 5 }],
+    }),
+  ];
+  const html = renderToStaticMarkup(
+    <RfqCompareCard rfqs={group} convert={actions.convert} onConverted={() => {}} onClose={() => {}} />,
+  );
+
+  it('shows a column for each supplier and a row for each item', () => {
+    expect(text(html)).toContain('Kopi Hulu Supplies RFQ-1 · Quoted');
+    expect(text(html)).toContain('Biji Segar RFQ-2 · Sent');
+    expect(text(html)).toContain('Arabica beans');
+    expect(text(html)).toContain('Robusta beans');
+  });
+  it('marks the lowest price in words, every supplier tied at it, and says where a supplier gave no price', () => {
+    expect(text(html).match(/Lowest RM 5\.00/g)).toHaveLength(2);
+    expect(text(html)).toContain('Not quoted');
+  });
+  it('offers Make purchase order only on a quoted RFQ that has no order, and names the order that stands', () => {
+    expect(text(html).match(/Make purchase order/g)).toHaveLength(1);
+    expect(text(html)).toContain('Order PO-0004');
   });
 });

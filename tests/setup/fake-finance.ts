@@ -57,6 +57,16 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
           call.filters[column] = value;
           return builder;
         },
+        /** Recorded as `<column> neq`, so it reads apart from an `eq` on the same column. */
+        neq(column: string, value: unknown) {
+          call.filters[`${column} neq`] = value;
+          return builder;
+        },
+        /** Recorded as `or`, in PostgREST's own words. */
+        or(filter: string) {
+          call.filters.or = filter;
+          return builder;
+        },
         order(column: string, options?: { ascending?: boolean }) {
           call.order.push(`${column} ${options?.ascending === false ? 'desc' : 'asc'}`);
           return builder;

@@ -3,6 +3,7 @@ import {
   convertRfqAction,
   deleteRfqAction,
   getRfqAction,
+  getRfqComparisonAction,
   getRfqForCopyAction,
   getSentRfqAction,
   quoteRfqAction,
@@ -32,6 +33,7 @@ const ACTIONS: RfqActions = {
   get: getRfqAction,
   getSent: getSentRfqAction,
   getForCopy: getRfqForCopyAction,
+  getComparison: getRfqComparisonAction,
 };
 
 export default async function RfqsScreen() {

@@ -23,6 +23,7 @@ const rfq = (
   fully_priced: status === 'quoted',
   purchase_order_id: null,
   purchase_order_no: null,
+  source_rfq_id: null,
 });
 
 /** Newest first, as the real list is: one RFQ for each status a person can see on a first visit. */

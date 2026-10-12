@@ -327,7 +327,7 @@ export function filterRfqs(rows: RfqListRow[], query: string, filter: RfqFilter,
   });
 }
 
-export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' | 'copy' | 'close';
+export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' | 'compare' | 'copy' | 'close';
 
 /**
  * What an RFQ's row menu offers, in order: only what the database allows for
@@ -336,18 +336,21 @@ export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' 
  * a late reply is still a reply), or the RFQ is closed. A quoted RFQ becomes a
  * purchase order, unless one stands already, or is closed. Any RFQ, in any
  * status, can be copied to another supplier: that opens a new RFQ and changes
- * nothing here, so it comes before what ends or removes the RFQ.
+ * nothing here, so it comes before what ends or removes the RFQ. An RFQ that
+ * has gone out with copies to other suppliers (`comparable`, see
+ * comparableRfqIds) can have its quotes compared, which changes nothing either.
  */
-export function rfqActions(row: RfqListRow): RfqAction[] {
+export function rfqActions(row: RfqListRow, comparable = false): RfqAction[] {
+  const compare: RfqAction[] = comparable ? ['compare'] : [];
   switch (row.status) {
     case 'draft':
       return ['edit', 'send', 'copy', 'delete'];
     case 'sent':
-      return ['recordPrices', 'copy', 'close'];
+      return ['recordPrices', ...compare, 'copy', 'close'];
     case 'quoted':
-      return row.purchase_order_id === null ? ['convert', 'copy', 'close'] : ['copy', 'close'];
+      return row.purchase_order_id === null ? ['convert', ...compare, 'copy', 'close'] : [...compare, 'copy', 'close'];
     default:
-      return ['copy'];
+      return [...compare, 'copy'];
   }
 }
 

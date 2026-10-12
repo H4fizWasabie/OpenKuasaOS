@@ -56,6 +56,8 @@ export const RFQ_MESSAGES = {
   missing: 'The supplier or a product on this RFQ no longer exists.',
   // FIN22, or the database's one-order-per-RFQ key
   hasOrder: 'This RFQ already has a purchase order. Cancel that order first to make another.',
+  // Compare quotes, when the group came apart since the page was loaded.
+  nothingToCompare: 'There are no other quotes for this request to compare it with.',
 } as const;
 
 const M = RFQ_MESSAGES;
@@ -82,6 +84,8 @@ export const saveRfqInput = z
   .object({
     /** Present to change a draft; absent to create one. */
     id: z.string({ error: M.gone }).uuid(M.gone).optional(),
+    /** The RFQ a new draft was copied from. Only creating a draft sets it; the database then never changes it. */
+    source_rfq_id: z.string({ error: M.gone }).uuid(M.gone).optional(),
     supplier_id: z.string({ error: M.supplier }).uuid(M.supplier),
     rfq_date: isoDate,
     reply_by: replyBy.default(null),
@@ -150,6 +154,11 @@ export type RfqListRow = {
   purchase_order_id: string | null;
   /** null when there is no order, and while that order is still a draft. */
   purchase_order_no: string | null;
+  /**
+   * The first RFQ of this one's group, when it was copied to another supplier: a copy of a copy
+   * names the first too. null for the first RFQ itself, and for one that was never copied.
+   */
+  source_rfq_id: string | null;
 };
 
 export type RfqLine = {
@@ -168,6 +177,11 @@ export type RfqDetail = RfqListRow & {
   subtotal: number;
   sst_total: number;
   notes: string | null;
+  /**
+   * When the supplier's answer was recorded (Record prices); null until then. A price on an RFQ
+   * that has none was typed by the buyer, not quoted by the supplier.
+   */
+  quoted_at: string | null;
   lines: RfqLine[];
 };
 
@@ -179,7 +193,7 @@ export type RfqDetail = RfqListRow & {
 export type SaveAndSendRfqResult = FinResult<{ id: string; rfq_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,rfq_no,supplier_id,supplier_name,rfq_date,reply_by,supplier_ref,status,line_count,total,fully_priced,purchase_order_id,purchase_order_no';
+  'id,rfq_no,supplier_id,supplier_name,rfq_date,reply_by,supplier_ref,status,line_count,total,fully_priced,purchase_order_id,purchase_order_no,source_rfq_id';
 
 const LINE_COLUMNS = 'id,product_id,description,quantity,uom,pack_size,unit_price,sst_rate';
 
@@ -190,6 +204,7 @@ function toListRow(row: Record<string, unknown>): RfqListRow {
     total: Number(row.total),
     purchase_order_id: (row.purchase_order_id as string | null) ?? null,
     purchase_order_no: (row.purchase_order_no as string | null) ?? null,
+    source_rfq_id: (row.source_rfq_id as string | null) ?? null,
   };
 }
 
@@ -227,7 +242,7 @@ export async function getRfq(ctx: FinanceWriteContext, id: string): Promise<RfqD
   if (!rfqIdInput.safeParse({ id }).success) return null;
   const { data: rfq, error } = await ctx.client
     .from('finance_rfq_totals')
-    .select(`${LIST_COLUMNS},subtotal,sst_total,notes`)
+    .select(`${LIST_COLUMNS},subtotal,sst_total,notes,quoted_at`)
     .eq('org_id', ctx.orgId)
     .eq('id', id)
     .maybeSingle();
@@ -241,14 +256,38 @@ export async function getRfq(ctx: FinanceWriteContext, id: string): Promise<RfqD
     .order('position', { ascending: true })
     .order('id', { ascending: true });
   if (linesError) throw linesError;
-  const { subtotal, sst_total, notes, ...header } = rfq as unknown as Record<string, unknown>;
+  const { subtotal, sst_total, notes, quoted_at, ...header } = rfq as unknown as Record<string, unknown>;
   return {
     ...toListRow(header),
     subtotal: Number(subtotal),
     sst_total: Number(sst_total),
     notes: (notes as string | null) ?? null,
+    quoted_at: (quoted_at as string | null) ?? null,
     lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toRfqLine),
   };
+}
+
+/**
+ * Every RFQ of one RFQ's group that has gone to its supplier, with its lines, in the order they were
+ * made: the first RFQ, then its copies. Drafts are left out, as nothing has been asked of their supplier yet. Empty when
+ * the RFQ is not in this workspace or the id is not an id.
+ */
+export async function getRfqGroup(ctx: FinanceWriteContext, id: string): Promise<RfqDetail[]> {
+  const rfq = await getRfq(ctx, id);
+  if (!rfq) return [];
+  const first = rfq.source_rfq_id ?? rfq.id;
+  const { data, error } = await ctx.client
+    .from('finance_rfq_totals')
+    .select('id')
+    .eq('org_id', ctx.orgId)
+    .or(`id.eq.${first},source_rfq_id.eq.${first}`)
+    .neq('status', 'draft')
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true });
+  if (error) throw error;
+  // One read per RFQ: a group is the few suppliers asked for the same thing.
+  const group = await Promise.all(((data ?? []) as { id: string }[]).map((row) => getRfq(ctx, row.id)));
+  return group.filter((r): r is RfqDetail => r !== null);
 }
 
 /* ---- writes ----------------------------------------------------------- */

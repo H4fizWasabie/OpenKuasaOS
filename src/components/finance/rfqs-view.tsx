@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { ClipboardCheck, Copy, Download, Lock, MessageSquare, Pencil, Plus, Search, Send, Tag, Trash2 } from 'lucide-react';
+import { ClipboardCheck, Copy, Download, Lock, MessageSquare, Pencil, Plus, Scale, Search, Send, Tag, Trash2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { RfqCompareCard } from '@/components/finance/rfq-compare-card';
 import { RfqFormCard, type RfqFormActions } from '@/components/finance/rfq-form-card';
 import { type QuoteRfq, RfqPricesCard } from '@/components/finance/rfq-prices-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
@@ -35,6 +36,7 @@ import {
   rfqsView,
 } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
+import { comparableRfqIds } from '@/lib/finance/rfq-compare';
 import type { RfqDetail, RfqDisplayStatus, RfqListRow } from '@/lib/finance/rfqs';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { localIsoDate } from '@/lib/finance/bill-math';
@@ -53,6 +55,8 @@ export type RfqActions = RfqFormActions & {
   getSent: (input: unknown) => Promise<FinResult<RfqDetail>>;
   /** Reads one RFQ in any status with its lines, to start a new RFQ from it. */
   getForCopy: (input: unknown) => Promise<FinResult<RfqDetail>>;
+  /** Reads the RFQs of one RFQ's group that have gone to their supplier, with their lines, for Compare quotes. */
+  getComparison: (input: unknown) => Promise<FinResult<RfqDetail[]>>;
 };
 
 /** What only a person who may edit is given: the actions, and what the form offers. */
@@ -72,8 +76,8 @@ const STATUS_STYLES: Record<RfqDisplayStatus, string> = {
   draft: 'bg-muted text-muted-foreground',
 };
 
-/** A question asked in an RFQ's own row. `edit`, `recordPrices` and `copy` are not: they open a card. */
-type Question = Exclude<RfqAction, 'edit' | 'recordPrices' | 'copy'>;
+/** A question asked in an RFQ's own row. `edit`, `recordPrices`, `copy` and `compare` are not: they open a card. */
+type Question = Exclude<RfqAction, 'edit' | 'recordPrices' | 'copy' | 'compare'>;
 
 /** One thing open at a time: a form card, or a question in one row. */
 type Open =
@@ -84,6 +88,8 @@ type Open =
   | { kind: 'prices'; rfq: RfqListRow; detail: RfqDetail | null }
   /** `detail` is null while the RFQ to copy is being read. */
   | { kind: 'copy'; rfq: RfqListRow; detail: RfqDetail | null; today: string; nonce: number }
+  /** `group` is null while the RFQs to compare are being read. */
+  | { kind: 'compare'; rfq: RfqListRow; group: RfqDetail[] | null }
   /** A draft purchase order has just been made from this RFQ. */
   | { kind: 'converted'; rfq: RfqListRow }
   | { kind: Question; rfq: RfqListRow }
@@ -121,12 +127,14 @@ export function RfqsView({
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
   const asking =
-    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' && open.kind !== 'copy' && open.kind !== 'converted' ? open : null;
+    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' && open.kind !== 'copy' && open.kind !== 'compare' && open.kind !== 'converted' ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const formOpen = open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'prices' || open?.kind === 'copy';
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((r) => r.id === asking.rfq.id) : false;
-  const locked = confirm.pending || formOpen;
+  // Compare quotes is not a form, but it can make an order, so the rows wait while it is open too.
+  const locked = confirm.pending || formOpen || open?.kind === 'compare';
+  const comparable = comparableRfqIds(rows);
   const now = () => localIsoDate(new Date());
   /** Opens one thing, dropping whatever message the last question left behind. */
   const ask = (next: Exclude<Open, null>) => {
@@ -181,6 +189,20 @@ export function RfqsView({
             loader.run(
               () => actions.getForCopy({ id: rfq.id }),
               (detail) => setOpen((cur) => (cur?.kind === 'copy' && cur.rfq.id === rfq.id ? { ...cur, detail } : cur)),
+            );
+          },
+        };
+      case 'compare':
+        return {
+          label: 'Compare quotes',
+          icon: Scale,
+          opens: true,
+          onSelect: () => {
+            loader.clear();
+            ask({ kind: 'compare', rfq, group: null });
+            loader.run(
+              () => actions.getComparison({ id: rfq.id }),
+              (group) => setOpen((cur) => (cur?.kind === 'compare' && cur.rfq.id === rfq.id ? { ...cur, group } : cur)),
             );
           },
         };
@@ -341,6 +363,19 @@ export function RfqsView({
         loading('New RFQ', `Copying ${open.rfq.rfq_no ?? 'the draft'} to ${open.rfq.supplier_name}`)
       );
     }
+    if (open.kind === 'compare') {
+      return open.group ? (
+        <RfqCompareCard
+          key={open.rfq.id}
+          rfqs={open.group}
+          convert={actions.convert}
+          onConverted={(rfq) => ask({ kind: 'converted', rfq })}
+          onClose={close}
+        />
+      ) : (
+        loading('Compare quotes', `The quotes asked for with ${open.rfq.rfq_no ?? 'this RFQ'}`)
+      );
+    }
     if (open.kind === 'prices') {
       return open.detail ? (
         <RfqPricesCard key={open.detail.id} rfq={open.detail} quote={actions.quote} onClose={close} />
@@ -495,7 +530,7 @@ export function RfqsView({
                 {shown.map((r) => {
                   const asked = question(r);
                   if (asked) return asked;
-                  const items = writer ? rfqActions(r).map((action) => menuItem(r, action, writer.actions)) : [];
+                  const items = writer ? rfqActions(r, comparable.has(r.id)).map((action) => menuItem(r, action, writer.actions)) : [];
                   const status = rfqDisplayStatus(r, today);
                   return (
                     <TableRow key={r.id} className={cn(r.status === 'closed' && 'opacity-60')}>

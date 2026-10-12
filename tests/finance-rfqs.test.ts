@@ -6,6 +6,7 @@ import {
   convertRfq,
   deleteRfq,
   getRfq,
+  getRfqGroup,
   listRfqs,
   quoteRfq,
   quoteRfqInput,
@@ -89,7 +90,7 @@ describe('RFQ reads', () => {
   const row = (n: number, extra: Record<string, unknown> = {}) => ({
     id: `rfq-${n}`, rfq_no: `RFQ-${n}`, supplier_id: 's1', supplier_name: 'Syarikat Kertas',
     rfq_date: '2026-10-01', reply_by: '2026-10-31', supplier_ref: null, status: 'quoted',
-    line_count: 2, total: '132.50', fully_priced: true, purchase_order_id: null, purchase_order_no: null, ...extra,
+    line_count: 2, total: '132.50', fully_priced: true, purchase_order_id: null, purchase_order_no: null, source_rfq_id: null, ...extra,
   });
   const read = (n: number, extra: Record<string, unknown> = {}) => ({ ...row(n), line_count: 2, total: 132.5, ...extra });
 
@@ -122,11 +123,11 @@ describe('RFQ reads', () => {
     ];
     const { ctx, calls } = fakeFinance((call) =>
       call.name === 'finance_rfq_totals'
-        ? { data: { ...row(1), subtotal: '125.00', sst_total: '7.50', notes: 'Urgent' }, error: null }
+        ? { data: { ...row(1), subtotal: '125.00', sst_total: '7.50', notes: 'Urgent', quoted_at: '2026-10-02T09:00:00+00:00' }, error: null }
         : { data: lines, error: null },
     );
     expect(await getRfq(ctx, ID)).toEqual({
-      ...read(1), subtotal: 125, sst_total: 7.5, notes: 'Urgent',
+      ...read(1), subtotal: 125, sst_total: 7.5, notes: 'Urgent', quoted_at: '2026-10-02T09:00:00+00:00',
       lines: [
         { ...lines[0], quantity: 10, unit_price: 12.5, sst_rate: 6 },
         { ...lines[1], quantity: 1, unit_price: null, sst_rate: 0 },
@@ -141,6 +142,27 @@ describe('RFQ reads', () => {
     const bad = fakeFinance({ data: null, error: null });
     expect(await getRfq(bad.ctx, 'nope')).toBeNull();
     expect(bad.calls).toEqual([]);
+  });
+  it('reads a group from its first RFQ: that RFQ and every copy that names it, drafts left out, in the order made', async () => {
+    const FIRST = '55555555-5555-4555-8555-555555555555';
+    const { ctx, calls } = fakeFinance((call) => {
+      if (call.name === 'finance_rfq_lines') return { data: [], error: null };
+      // The group's ids; then each RFQ by its own id, the clicked copy first.
+      if (call.columns === 'id') return { data: [{ id: FIRST }, { id: ID }], error: null };
+      return { data: row(1, { id: call.filters.id, source_rfq_id: call.filters.id === ID ? FIRST : null }), error: null };
+    });
+    const group = await getRfqGroup(ctx, ID);
+    expect(group.map((r) => r.id)).toEqual([FIRST, ID]);
+    expect(calls[2]).toMatchObject({
+      name: 'finance_rfq_totals',
+      filters: { org_id: 'org-1', or: `id.eq.${FIRST},source_rfq_id.eq.${FIRST}`, 'status neq': 'draft' },
+      order: ['created_at asc', 'id asc'],
+    });
+  });
+  it('reads no group for an RFQ that is not there', async () => {
+    const { ctx, calls } = fakeFinance({ data: null, error: null });
+    expect(await getRfqGroup(ctx, ID)).toEqual([]);
+    expect(calls).toHaveLength(1);
   });
 });
 
