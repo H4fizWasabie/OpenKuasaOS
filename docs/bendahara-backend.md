@@ -166,7 +166,7 @@ policy.
 | `private.finance_receipt_deletions` | The paths of files to remove from the bucket. Written by a trigger when a receipt is deleted and by the clean-up function that finds unrecorded uploads; reachable by nobody but four `service_role` functions. |
 | `finance_statement_imports` | One row per bank statement file imported for one account: `account_id`, `file_name`, `created_by`. |
 | `finance_statement_lines` | One row per line of a statement, in the file's order (`position`): `line_date`, `description`, and `money_in` or `money_out`, never both. `transaction_id` is the movement of money a person matched it to; a movement is matched by at most one line. A line belongs to its import's account. |
-| `finance_rfqs` | RFQs. Described here only for `source_rfq_id`: the first RFQ of the group a copied RFQ belongs to, and null for the first RFQ itself and for an RFQ that was not copied from another. It is set once, when the copy is first saved, and a copy of a copy names the first RFQ, so a group is one RFQ and every RFQ that names it, with no chain to follow. The foreign key is on `(org_id, source_rfq_id)`, so the link never leaves the workspace, and there is an index on the same pair. After that the link does not change, except that deleting the first RFQ, which only a draft allows, clears it on every copy (`on delete set null (source_rfq_id)`). |
+| `finance_rfqs` | RFQs. Described here only for `source_rfq_id`: the first RFQ of the group a copied RFQ belongs to, and null for the first RFQ itself and for an RFQ that was not copied from another. It is set once, when the copy is first saved, and a copy of a copy names the first RFQ, so a group is one RFQ and every RFQ that names it, with no chain to follow. The foreign key is on `(org_id, source_rfq_id)`, so the link never leaves the workspace, and there is an index on the same pair. After that the link does not change from a signed-in caller, except that deleting the first RFQ, which only a draft allows, clears it on every copy (`on delete set null (source_rfq_id)`). |
 
 ## Document numbers
 
@@ -1301,8 +1301,8 @@ The same migration changes two more things. The RFQ guard
 (`private.finance_rfq_guard`, the trigger on `finance_rfqs`) sets the link
 when an RFQ is inserted: it follows a copy of a copy back to the first RFQ,
 and refuses a source it cannot find in the RFQ's own workspace (`FIN11`), so
-a new RFQ cannot name another workspace's RFQ, or itself. On an update it
-refuses any change to the link (`FIN01`); the one change it lets through is
+a new RFQ cannot name another workspace's RFQ, or itself. On an update from
+a signed-in caller it refuses any change to the link (`FIN01`); the one change it lets through is
 the foreign key clearing the link because the first RFQ was deleted. The view
 `finance_rfq_totals` lists its columns by name and ends with a new one,
 `source_rfq_id`; the columns before it are the same, in the same order.
@@ -2015,10 +2015,11 @@ with no date).
   anonymous accounts. They remove their own files; a run that is killed
   half-way can leave files in the bucket, which the clean-up run takes
   after an hour.
-- Only RFQs made with Copy to another supplier after
-  `20261116090000_bendahara_rfq_source` can be compared. RFQs that existed
-  before it, and RFQs typed separately for the same request, carry no link,
-  and nothing joins them afterwards.
+- An RFQ can be compared only with the RFQs copied from it, directly or
+  through another copy, with Copy to another supplier after
+  `20261116090000_bendahara_rfq_source`, and those copies with each other.
+  RFQs copied before it, and RFQs typed separately for the same request, carry
+  no link to each other, and nothing joins them afterwards.
 - Compare quotes matches lines by unit and pack size as they were typed. A
   carton of 12 is not compared with singles: they are two rows, each with one
   price and no mark. `pcs` and `pc` are two rows as well; a capital or a
