@@ -89,13 +89,23 @@ export function DocumentFormCard<F extends DocumentFormState>({
       return;
     }
     const payload = kind.payload(form);
+    // A refusal may change what the form holds, so that the next try is not refused the same way.
+    const refused = (error: string) => {
+      const { afterRefusal } = kind;
+      if (afterRefusal) setForm((f) => afterRefusal(f, error));
+    };
     setPosting(post);
     if (!post) {
-      save.run(() => actions.save(payload), onClose);
+      save.run(async () => {
+        const result = await actions.save(payload);
+        if (!result.ok) refused(result.error);
+        return result;
+      }, onClose);
       return;
     }
     save.run(async () => {
       const result = await actions.saveAndPost(payload);
+      if (!result.ok) refused(result.error);
       // Saved but not posted: go on editing that draft, so a second try does not save a second document.
       if (!result.ok && result.draftId) {
         const draftId = result.draftId;

@@ -44,6 +44,9 @@ export const RFQ_MESSAGES = {
   tooLong: LINE_MESSAGES.tooLong,
   product: LINE_MESSAGES.product,
   gone: 'That RFQ no longer exists.',
+  // FIN11 on saving a new RFQ that was copied from another: the one it was copied from is not there to copy.
+  // The form then lets go of the link (rfqFormAfterRefusal), so saving again saves this RFQ without it.
+  copiedFromGone: 'The RFQ this was copied from no longer exists. Save again to keep this one on its own.',
   // FIN01. A menu offers only what an RFQ's status allows, so this reaches a person only when the RFQ
   // changed under them in another tab. It says what may have happened, not what did.
   locked:
@@ -292,7 +295,11 @@ export async function getRfqGroup(ctx: FinanceWriteContext, id: string): Promise
 
 /* ---- writes ----------------------------------------------------------- */
 
-/** Creates a draft RFQ, or replaces a draft's header and lines. */
+/**
+ * Creates a draft RFQ, or replaces a draft's header and lines. FIN11 on a new RFQ can only be about the
+ * RFQ it was copied from: nothing else is looked up when a draft is created. It gets its own sentence,
+ * so the person is not told that the RFQ in front of them is gone.
+ */
 export async function saveRfq(
   ctx: FinanceWriteContext,
   input: z.input<typeof saveRfqInput>,
@@ -303,7 +310,10 @@ export async function saveRfq(
     rfq,
     lines,
   });
-  if (error || !data) return rfqWriteFailed('saveRfq', error);
+  if (error || !data) {
+    if (pgCode(error) === 'FIN11' && !rfq.id && rfq.source_rfq_id) return { ok: false, error: M.copiedFromGone };
+    return rfqWriteFailed('saveRfq', error);
+  }
   return { ok: true, data: { id: data as string } };
 }
 

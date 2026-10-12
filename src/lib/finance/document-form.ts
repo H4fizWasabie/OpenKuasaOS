@@ -208,4 +208,9 @@ export type DocumentFormKind<F extends DocumentFormState> = {
   /** What is sent to the save action. */
   payload: (form: F) => unknown;
   savedNotPosted: (error: string) => string;
+  /**
+   * What the form holds once a save was refused with this sentence. Absent, a refusal changes nothing; an
+   * RFQ copied from one that is gone lets go of that link, so the next save can succeed.
+   */
+  afterRefusal?: (form: F, error: string) => F;
 };

@@ -157,6 +157,18 @@ export function rfqSavedNotSent(error: string): string {
   return `The RFQ was saved as a draft, but it was not marked as sent. ${error}`;
 }
 
+/**
+ * What the form holds after a refused save. When the RFQ it was copied from is gone
+ * (`RFQ_MESSAGES.copiedFromGone`) the form lets go of it: sent again, it is saved as an RFQ of its own
+ * and not refused for good. Any other refusal changes nothing.
+ */
+export function rfqFormAfterRefusal(form: RfqForm, error: string): RfqForm {
+  if (error !== RFQ_MESSAGES.copiedFromGone) return form;
+  const rest = { ...form };
+  delete rest.source_rfq_id;
+  return rest;
+}
+
 /** An RFQ is marked as sent, not posted: the shared card says so. */
 export const RFQ_FORM_WORDS: DocumentFormWords = {
   newSubtitle: 'Saved as a draft until it is marked as sent',
@@ -180,6 +192,7 @@ export const RFQ_FORM_KIND: DocumentFormKind<RfqForm> = {
   error: rfqFormError,
   payload: rfqPayload,
   savedNotPosted: rfqSavedNotSent,
+  afterRefusal: rfqFormAfterRefusal,
 };
 
 /* ---- recording the supplier's prices ---------------------------------- */

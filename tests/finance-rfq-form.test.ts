@@ -8,6 +8,7 @@ import {
   priceDrafts,
   quoteFormError,
   quotePayload,
+  rfqFormAfterRefusal,
   rfqFormCopiedFrom,
   rfqFormError,
   rfqFormFromDetail,
@@ -15,7 +16,7 @@ import {
   rfqSavedNotSent,
   withRfqProduct,
 } from '@/lib/finance/rfq-form';
-import { type RfqDetail, quoteRfqInput, saveRfqInput } from '@/lib/finance/rfqs';
+import { RFQ_MESSAGES, type RfqDetail, quoteRfqInput, saveRfqInput } from '@/lib/finance/rfqs';
 import { WRITE_FAILED } from '@/lib/finance/result';
 
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
@@ -117,6 +118,23 @@ describe('a copy of an RFQ, for another supplier', () => {
     rfqFormCopiedFrom(priced, today);
     expect(JSON.stringify(priced)).toBe(before);
   });
+  it('lets go of the RFQ it was copied from once that RFQ is gone, so saving again is not refused the same way', () => {
+    const chosen = RFQ_FORM_KIND.withParty(rfqFormCopiedFrom(priced, today), { id: SUPPLIER, payment_terms_days: 30 });
+    const after = rfqFormAfterRefusal(chosen, RFQ_MESSAGES.copiedFromGone);
+    expect(after).not.toHaveProperty('source_rfq_id');
+    expect(rfqPayload(after)).not.toHaveProperty('source_rfq_id');
+    // Everything the person typed is still there, and it is still a new RFQ.
+    expect(after).toEqual({ ...chosen, source_rfq_id: undefined });
+    expect(rfqFormError(after)).toBeNull();
+    expect(rfqPayload(after)).not.toHaveProperty('id');
+    expect(chosen.source_rfq_id).toBe(priced.id);
+  });
+  it('keeps the RFQ it was copied from through any other refusal', () => {
+    const chosen = RFQ_FORM_KIND.withParty(rfqFormCopiedFrom(priced, today), { id: SUPPLIER, payment_terms_days: 30 });
+    for (const error of [RFQ_MESSAGES.gone, RFQ_MESSAGES.missing, RFQ_MESSAGES.locked, WRITE_FAILED, '']) {
+      expect(rfqFormAfterRefusal(chosen, error), error).toBe(chosen);
+    }
+  });
 });
 
 describe('what the RFQ form sends', () => {
@@ -197,6 +215,7 @@ describe('the RFQ form, as the shared card draws it', () => {
     expect(RFQ_FORM_KIND.error).toBe(rfqFormError);
     expect(RFQ_FORM_KIND.payload).toBe(rfqPayload);
     expect(RFQ_FORM_KIND.savedNotPosted).toBe(rfqSavedNotSent);
+    expect(RFQ_FORM_KIND.afterRefusal).toBe(rfqFormAfterRefusal);
   });
   it('is marked as sent, never posted, in every word the card shows', () => {
     const words = documentFormWords(RFQ_FORM_KIND);

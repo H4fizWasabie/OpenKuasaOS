@@ -223,6 +223,29 @@ describe('RFQ writes', () => {
     }
     expect(logged).not.toHaveBeenCalled();
   });
+  it('says the RFQ it was copied from is gone when a new copy is refused with FIN11, and nothing else', async () => {
+    const sentence = 'The RFQ this was copied from no longer exists. Save again to keep this one on its own.';
+    const copy = { ...valid, source_rfq_id: ID };
+    const refused = () => fakeFinance({ data: null, error: { code: 'FIN11' } }).ctx;
+    expect(await saveRfq(refused(), copy)).toEqual({ ok: false, error: sentence });
+    expect(RFQ_MESSAGES.copiedFromGone).toBe(sentence);
+    // A draft being changed that is gone is that RFQ, whatever link is sent with it; so is a new RFQ with no link.
+    const OTHER = '55555555-5555-4555-8555-555555555555';
+    expect(await saveRfq(refused(), { ...copy, id: OTHER })).toEqual({ ok: false, error: 'That RFQ no longer exists.' });
+    expect(await saveRfq(refused(), { ...valid, id: OTHER })).toEqual({ ok: false, error: 'That RFQ no longer exists.' });
+    expect(await saveRfq(refused(), valid)).toEqual({ ok: false, error: 'That RFQ no longer exists.' });
+    // Any other refusal of a new copy keeps its own sentence.
+    for (const [code, message] of [['23503', RFQ_MESSAGES.missing], ['42501', 'You do not have permission to make changes here.']]) {
+      const { ctx } = fakeFinance({ data: null, error: { code } });
+      expect(await saveRfq(ctx, copy), code).toEqual({ ok: false, error: message });
+    }
+    expect(logged).not.toHaveBeenCalled();
+  });
+  it('saves a copy again without its link once the form has let go of it', async () => {
+    const { ctx, calls } = fakeFinance({ data: ID, error: null });
+    expect(await saveRfq(ctx, valid)).toEqual({ ok: true, data: { id: ID } });
+    expect((calls[0].args as { rfq: object }).rfq).not.toHaveProperty('source_rfq_id');
+  });
   it('says the RFQ is gone when a delete touches no row', async () => {
     const { ctx } = fakeFinance({ data: null, error: null });
     expect(await deleteRfq(ctx, { id: ID })).toEqual({ ok: false, error: 'That RFQ no longer exists.' });
