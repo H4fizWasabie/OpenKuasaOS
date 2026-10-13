@@ -413,7 +413,7 @@ const rfq = (r: Partial<RfqListRow>): RfqListRow => {
     status: 'sent',
     line_count: 2,
     total: 0,
-    fully_priced: false,
+    quoted_at: null,
     purchase_order_id: null,
     purchase_order_no: null,
     source_rfq_id: null,
@@ -522,8 +522,8 @@ describe('rfqsCsv', () => {
       [
         rfq({ rfq_no: 'RFQ-0007', rfq_date: '2026-10-01', reply_by: '2026-10-08', supplier_name: '=cmd|calc', status: 'sent', line_count: 3 }),
         rfq({ rfq_no: null, status: 'draft', reply_by: null, supplier_name: 'Lim, Tan & Co', line_count: 1 }),
-        rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411', total: 132.5, fully_priced: true, line_count: 2, purchase_order_no: 'PO-0003' }),
-        rfq({ rfq_no: 'RFQ-0010', status: 'sent', total: 40, fully_priced: false, line_count: 2 }),
+        rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411', total: 132.5, quoted_at: '2026-10-02T09:00:00Z', line_count: 2, purchase_order_no: 'PO-0003' }),
+        rfq({ rfq_no: 'RFQ-0010', status: 'sent', total: 40, line_count: 2 }),
       ],
       today,
     );
