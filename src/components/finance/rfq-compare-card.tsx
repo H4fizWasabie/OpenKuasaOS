@@ -69,8 +69,8 @@ export function RfqCompareCard({
     opener.current?.focus();
   };
   // A question whose RFQ can no longer be ordered goes, and its buttons with it: focus goes to Close, not to the page.
-  // Before the browser paints, so focus does not rest on the page in between. The refusal is the line above Close,
-  // so scrolling Close into view keeps it in view too.
+  // Before the browser paints, so focus rests on the page for one frame at most (the question goes a commit before
+  // its action stops pending). The refusal is the line above Close, so scrolling Close into view keeps it in view too.
   const dropped = confirming !== null && asked === null;
   useLayoutEffect(() => {
     if (dropped && !action.pending) closeButton.current?.focus();
@@ -78,7 +78,8 @@ export function RfqCompareCard({
 
   return (
     <BentoCard
-      // The row menu hands focus to `data-finance-focus`; here that is the title, so the card opens at its top.
+      // The title takes focus when the comparison appears (the effect above), so the card opens at its top. It carries
+      // `data-finance-focus` too, for a group that arrives before the row menu has handed focus on.
       title={
         <span ref={heading} tabIndex={-1} data-finance-focus>
           Compare quotes
@@ -108,7 +109,7 @@ export function RfqCompareCard({
             {rows.map((row) => (
               <TableRow key={row.key}>
                 {/* The row's header, drawn as the other cells are: a header cell is otherwise shorter and bold. */}
-                <TableHead scope="row" className="h-auto min-w-48 p-2 font-normal break-words whitespace-normal align-top">
+                <TableHead scope="row" className="h-auto min-w-48 p-2 font-normal [overflow-wrap:anywhere] whitespace-normal align-top">
                   <span className="font-medium">{row.description}</span>
                   {row.uom || row.pack_size ? (
                     <span className="block text-xs text-muted-foreground">{[row.uom, row.pack_size].filter(Boolean).join(' · ')}</span>

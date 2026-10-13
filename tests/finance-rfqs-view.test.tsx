@@ -328,7 +328,8 @@ describe('Compare quotes', () => {
   });
   it('lets an item description and a supplier name wrap, an unbroken description too', () => {
     const item = html.match(/<th [^>]*class="([^"]*)"[^>]*><span class="font-medium">Arabica beans</)?.[1].split(' ') ?? [];
-    expect(item).toEqual(expect.arrayContaining(['whitespace-normal', 'break-words']));
+    // `break-words` does not lower a table cell's least width, so an unbroken word would widen the column instead.
+    expect(item).toEqual(expect.arrayContaining(['whitespace-normal', '[overflow-wrap:anywhere]']));
     expect(item).not.toContain('whitespace-nowrap');
     const supplier = classesOf(html, 'Kopi Hulu Supplies');
     expect(supplier).toContain('whitespace-normal');
