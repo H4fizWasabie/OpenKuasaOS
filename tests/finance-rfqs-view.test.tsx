@@ -130,7 +130,9 @@ describe('the RFQs list', () => {
 
   it('shows a dash for the total until the supplier answers, and the order number when there is one', () => {
     // Prices the buyer typed before sending are not a quote.
-    expect(text(render([row({ status: 'sent', total: 120 })]))).toContain('—');
+    const typed = text(render([row({ status: 'sent', total: 120 })]));
+    expect(typed).toContain('—');
+    expect(typed).not.toContain('120.00');
     const priced = text(render([row({ status: 'quoted', total: 1234.5, quoted_at: '2026-10-02T09:00:00Z', purchase_order_no: 'PO-0007' })]));
     expect(priced).toContain('1,234.50');
     expect(priced).toContain('PO-0007');
