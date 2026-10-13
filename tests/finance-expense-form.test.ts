@@ -11,9 +11,13 @@ import {
   expenseQuestion,
   expenseFormError,
   expenseHiddenNote,
+  expenseLeft,
   expenseName,
   expensePayload,
   expensePaymentNote,
+  expensesScreenPlan,
+  payCardOpening,
+  showsPayCard,
   expenseSaveHint,
   isPartPaid,
   newExpenseForm,
@@ -159,20 +163,35 @@ describe('what a row offers', () => {
     expect(expenseActions(rejected, true)).toEqual(['edit', 'delete']);
     expect(expenseActions(rejected, false)).toEqual(['edit', 'delete']);
   });
-  it('an approved expense: reject for an owner or admin while no payment stands against it, and nothing else', () => {
-    expect(expenseActions(approved(), true)).toEqual(['reject']);
+  it('an approved expense: an owner or admin marks it paid while anything is left, and rejects it while no payment stands against it', () => {
+    expect(expenseActions(approved(), true)).toEqual(['pay', 'reject']);
     expect(expenseActions(approved(), false)).toEqual([]);
+    // All of it is held by a payment still to be paid: nothing is left to pay, and it cannot be rejected.
     expect(expenseActions(approved({ held: 120 }), true)).toEqual([]);
-    expect(expenseActions(approved({ paid: 30 }), true)).toEqual([]);
+    expect(expenseActions(approved({ held: 20 }), true)).toEqual(['pay']);
+    expect(expenseActions(approved({ paid: 30 }), true)).toEqual(['pay']);
+    expect(expenseActions(approved({ paid: 100.1, held: 19.9 }), true)).toEqual([]);
     expect(expenseActions(approved({ paid: 120, display_status: 'paid' }), true)).toEqual([]);
     expect(expenseActions(approved({ paid: 120, display_status: 'paid' }), false)).toEqual([]);
   });
-  it('never offers a member approve or reject, whatever the row', () => {
+  it('never offers a member approve, reject or mark paid, whatever the row', () => {
     const rows = [row(), row({ status: 'rejected', display_status: 'rejected' }), approved(), approved({ paid: 1 }), approved({ held: 1 })];
     for (const r of rows) {
       expect(expenseActions(r, false)).not.toContain('approve');
       expect(expenseActions(r, false)).not.toContain('reject');
+      expect(expenseActions(r, false)).not.toContain('pay');
     }
+  });
+  it('never offers mark paid on an expense that is not approved', () => {
+    expect(expenseActions(row(), true)).not.toContain('pay');
+    expect(expenseActions(row({ status: 'rejected', display_status: 'rejected' }), true)).not.toContain('pay');
+  });
+  it('works out what is left of an expense to the sen, and never below nothing', () => {
+    expect(expenseLeft(approved())).toBe(120);
+    expect(expenseLeft(approved({ paid: 30, held: 20 }))).toBe(70);
+    expect(expenseLeft(approved({ paid: 100.1, held: 19.9 }))).toBe(0);
+    expect(expenseLeft(approved({ paid: 0.1, held: 0.2 }))).toBe(119.7);
+    expect(expenseLeft(approved({ paid: 100, held: 50 }))).toBe(0);
   });
   it('names an expense by its amount and vendor', () => {
     expect(expenseName(row())).toBe('the expense of RM 120.00 to Kedai Ali');
@@ -288,5 +307,50 @@ describe('an expense just written that is not in the list', () => {
     expect(writtenExpenseTitle(written('rejected'))).toBe('Expense rejected');
     expect(writtenExpenseTitle(written('pending'))).toBe('Expense sent for approval');
     expect(writtenExpenseTitle(written(null))).toBe('Expense saved');
+  });
+});
+
+describe('who the Expenses screen reads for, and who is drawn the Mark paid card', () => {
+  it('gives an owner or admin the form, the card and the accounts', () => {
+    for (const role of ['owner', 'admin'] as const) {
+      expect(expensesScreenPlan(role, false), role).toEqual({
+        canEdit: true,
+        canDecide: true,
+        readsContacts: true,
+        readsCategories: true,
+        readsAccounts: true,
+      });
+    }
+  });
+  it('gives a member the form and no accounts, and no card', () => {
+    expect(expensesScreenPlan('member', false)).toEqual({
+      canEdit: true,
+      canDecide: false,
+      readsContacts: true,
+      readsCategories: true,
+      readsAccounts: false,
+    });
+  });
+  it('gives a viewer, and anyone in the demo workspace, nothing to write and no read for it', () => {
+    const none = { canEdit: false, canDecide: false, readsContacts: false, readsCategories: false, readsAccounts: false };
+    expect(expensesScreenPlan('viewer', false)).toEqual(none);
+    expect(expensesScreenPlan('owner', true)).toEqual(none);
+    expect(expensesScreenPlan('admin', true)).toEqual(none);
+    expect(expensesScreenPlan('member', true)).toEqual(none);
+  });
+  it('draws the card only for a writer who may decide, and only while it is the card that is open', () => {
+    const writer = (canDecide: boolean) => ({ canDecide });
+    expect(showsPayCard(writer(true), 'pay')).toBe(true);
+    expect(showsPayCard(writer(false), 'pay')).toBe(false);
+    expect(showsPayCard(undefined, 'pay')).toBe(false);
+    expect(showsPayCard(writer(true), 'form')).toBe(false);
+    expect(showsPayCard(writer(true), undefined)).toBe(false);
+  });
+  it('opens the card with the date on the person\'s own clock, not the server\'s', () => {
+    // Built from local parts, so whatever zone the machine is in, it is the 14th for the person.
+    const late = new Date(2026, 9, 14, 23, 30);
+    const early = new Date(2026, 9, 14, 0, 30);
+    expect(payCardOpening(row(), late)).toEqual({ kind: 'pay', today: '2026-10-14', row: row() });
+    expect(payCardOpening(row(), early).today).toBe('2026-10-14');
   });
 });

@@ -55,6 +55,7 @@ import {
   saveCreditNoteInput,
   voidCreditNote,
 } from '@/lib/finance/credit-notes';
+import { markExpensePaid, markExpensePaidInput } from '@/lib/finance/expense-payment';
 import {
   EXPENSE_MESSAGES,
   approveExpense,
@@ -183,6 +184,17 @@ import {
   PAID_NOW_NEEDS_SIGN_OFF,
   READ_FAILED,
 } from '@/lib/finance/result';
+import {
+  VOUCHER_MESSAGES,
+  approveVoucher,
+  deleteVoucher,
+  deleteVoucherInput,
+  recordVoucher,
+  recordVoucherInput,
+  rejectVoucher,
+  voucherDecisionInput,
+} from '@/lib/finance/vouchers';
+import { TRANSFER_MESSAGES, recordTransfer, recordTransferInput, voidTransfer, voidTransferInput } from '@/lib/finance/transfers';
 import { createClient } from '@/lib/supabase/server';
 
 const FORBIDDEN: FinResult<never> = { ok: false, error: NOT_ALLOWED };
@@ -296,6 +308,10 @@ const BANK_ACCOUNT_PATHS = [
   '/finance/payment-vouchers',
   ...LEDGER_PATHS,
 ];
+// A transfer between two accounts is on Banking, where both balances move, and in the books: one entry, debit the
+// account it reached and credit the one it left, and a second entry that reverses it when it is voided. It is on
+// no other screen: Cash Receipts and Payment Vouchers leave both sides of a transfer out, and no document is paid.
+const TRANSFER_PATHS = ['/finance/banking', ...LEDGER_PATHS];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
 // supplier is also a voucher: Payment Vouchers lists every movement of money out.
 const PURCHASE_PATHS = [
@@ -309,7 +325,9 @@ const PURCHASE_PATHS = [
 ];
 // A bill saved, posted, voided or deleted changes the billed total of the purchase order it is raised against
 // (drafts count), so Purchase Orders refreshes with the purchase screens. A payment does not, so it keeps PURCHASE_PATHS.
-const BILL_PATHS = [...PURCHASE_PATHS, '/finance/purchase-orders'];
+// Receipts Inbox names the bill a receipt is tied to: posting gives a draft its number, and deleting a draft sends
+// its receipt back to Unmatched. KEEP IN STEP with RECEIPT_BILL_PATHS in src/lib/finance/receipt-match.ts.
+const BILL_PATHS = [...PURCHASE_PATHS, '/finance/purchase-orders', '/finance/receipts-inbox'];
 // An invoice or a payment in changes what customers owe, which Customers & Suppliers shows as Receivable.
 // It also shows on the three follow-on screens: Quotations names the invoice made from a quotation, Credit
 // Notes names each note's invoice, and Refunds adds up what customers are in credit from the invoices.
@@ -506,6 +524,20 @@ export async function updateBankAccountAction(input: unknown) {
 /** Archives or restores an account. The database refuses an archive while money is still to be paid from it. */
 export async function setBankAccountActiveAction(input: unknown) {
   return run(BANK_ACCOUNT_PATHS, setBankAccountActiveInput, input, setBankAccountActive);
+}
+
+/* ---- transfers between accounts (Banking) ------------------------------- */
+
+/** Recording and voiding a transfer: an owner or admin only, told so in the transfer's own words. */
+const TRANSFER_SIGN_OFF = { signOff: true, signOffError: TRANSFER_MESSAGES.needsSignOff } as const;
+
+/** Moves money between two active accounts: both sides are posted at once with one TR- number. */
+export async function recordTransferAction(input: unknown) {
+  return run(TRANSFER_PATHS, recordTransferInput, input, recordTransfer, TRANSFER_SIGN_OFF);
+}
+/** Voids both sides of a posted transfer. */
+export async function voidTransferAction(input: unknown) {
+  return run(TRANSFER_PATHS, voidTransferInput, input, voidTransfer, TRANSFER_SIGN_OFF);
 }
 
 /* ---- supplier bills ---------------------------------------------------- */
@@ -835,6 +867,7 @@ export async function saveAndPostCashReceiptAction(input: unknown): Promise<Save
 // a voucher pays, which changes when a rejected expense that a voided voucher still names is edited. An approved
 // expense is two lines of the books (its category's account and Accrued Expenses), so approving or rejecting one
 // moves Chart of Accounts, Journals and Reports (LEDGER_PATHS): they end the list, as every action that changes the books does.
+// KEEP IN STEP with RECEIPT_EXPENSE_PATHS in src/lib/finance/receipt-match.ts.
 const EXPENSE_PATHS = [
   '/finance/expenses',
   '/finance/receipts-inbox',
@@ -864,6 +897,58 @@ export async function rejectExpenseAction(input: unknown) {
 /** Deletes a pending or rejected expense. */
 export async function deleteExpenseAction(input: unknown) {
   return run(EXPENSE_PATHS, expenseIdInput, input, deleteExpense);
+}
+/**
+ * Marks an approved expense paid, in full or in part: a payment voucher against it, paid now, from the account
+ * chosen. Paying is a sign-off: an owner or admin only, which the database enforces on the voucher (FIN14). The
+ * voucher shows on Payment Vouchers and Banking and moves the books, all of which EXPENSE_PATHS already refreshes.
+ */
+export async function markExpensePaidAction(input: unknown) {
+  return run(EXPENSE_PATHS, markExpensePaidInput, input, markExpensePaid, SIGN_OFF);
+}
+
+/* ---- payment vouchers -------------------------------------------------- */
+
+// A voucher is on Payment Vouchers. One that is waiting or still to be paid stands against the account it will
+// leave, which Banking will not archive while it does. A voucher that pays expenses holds its part of each, which
+// Expenses shows; one that pays supplier bills holds its part of each bill, which Supplier Bills and Payments
+// Out show, and once approved it is a payment still to be paid on Payments Out; a refund that was waiting is on
+// Refunds. A refund that is a draft or waiting holds credit on its invoice, which Invoices, Credit Notes,
+// Payments In and Customers & Suppliers count (the same four CREDIT_PATHS lists), so deleting or rejecting one
+// refreshes them. Nothing here posts, pays or voids, so the books do not move and the ledger screens are not in the list.
+const VOUCHER_PATHS = [
+  '/finance/payment-vouchers',
+  '/finance/banking',
+  '/finance/expenses',
+  '/finance/supplier-bills',
+  '/finance/payments-out',
+  '/finance/refunds',
+  '/finance/invoices',
+  '/finance/credit-notes',
+  '/finance/payments-in',
+  '/finance/customers-suppliers',
+];
+/** Approving or rejecting a voucher: an owner or admin only, told so in the voucher's own words. */
+const VOUCHER_DECIDE = { signOff: true, signOffError: VOUCHER_MESSAGES.needsDecider } as const;
+
+/**
+ * Records a voucher for a category. Anyone who may write can do this. The database approves it in the same call
+ * when the person recording it is an owner or admin, and makes it wait for approval otherwise; the answer says which.
+ */
+export async function recordVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, recordVoucherInput, input, recordVoucher);
+}
+/** Approves a voucher that is waiting, as the person was shown it (every field the row showed): an owner or admin only, which the guard on payments enforces. */
+export async function approveVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, voucherDecisionInput, input, approveVoucher, VOUCHER_DECIDE);
+}
+/** Rejects a voucher that is waiting, as the person was shown it: an owner or admin only. */
+export async function rejectVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, voucherDecisionInput, input, rejectVoucher, VOUCHER_DECIDE);
+}
+/** Deletes a voucher that has not been paid, while it still has the status the person was shown. */
+export async function deleteVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, deleteVoucherInput, input, deleteVoucher);
 }
 
 /* ---- chart of accounts and journals ------------------------------------ */

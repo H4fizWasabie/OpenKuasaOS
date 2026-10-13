@@ -9,6 +9,7 @@
 import { type ExpenseCategory, EXPENSE_MESSAGES, type ExpenseRow, type ExpenseStatus, saveExpenseInput } from './expenses';
 import { can } from '@/lib/auth/permissions';
 import type { OrgRole } from '@/lib/auth/current-org';
+import { localIsoDate } from './bill-math';
 import { rm, typedNumber } from './format';
 import { displayDate } from './view-helpers';
 
@@ -101,7 +102,7 @@ export function expenseFormError(form: ExpenseForm): string | null {
 }
 
 /** What is wrong with the way a money box was typed, when it is not just "not a number": a comma or RM, or more than a sen. */
-function moneyBoxError(text: string, format: string, decimals: string): string | null {
+export function moneyBoxError(text: string, format: string, decimals: string): string | null {
   if (/[,$]|^\s*(rm|myr)/i.test(text)) return format;
   if (/\.\d{3,}\s*$/.test(text)) return decimals;
   return null;
@@ -136,7 +137,16 @@ export function expenseSaveHint(canDecide: boolean, editing: ExpenseRow | undefi
 
 /* ---- the row ---------------------------------------------------------- */
 
-export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete';
+/**
+ * What is still to pay on an expense, to the sen: its amount less what is
+ * paid and less what payments not yet made hold (the database counts both,
+ * FIN05). Never below 0.
+ */
+export function expenseLeft(row: ExpenseRow): number {
+  return Math.max(0, Math.round((row.amount - row.paid - row.held) * 100) / 100);
+}
+
+export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete' | 'pay';
 
 /**
  * What an expense's row menu offers, by its status and by whether the person
@@ -146,20 +156,46 @@ export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete';
  *    an owner or admin also approves or rejects it;
  *  - rejected: edited (which sends it for approval again) or deleted;
  *    it is not approved as it stands;
- *  - approved, with nothing paid and nothing held by a payment: an owner or
- *    admin may reject it, which is its only way back; nobody edits or deletes it;
- *  - approved with a payment against it, paid or still to be paid, and paid:
- *    nothing.
+ *  - approved, for an owner or admin: marked paid while anything is left of
+ *    it (paying is a sign-off), and rejected while nothing is paid and
+ *    nothing is held by a payment, which is its only way back; nobody edits
+ *    or deletes it;
+ *  - approved, for anyone else, and paid in full: nothing.
  */
 export function expenseActions(row: ExpenseRow, canDecide: boolean): ExpenseAction[] {
   if (row.status === 'pending') return canDecide ? ['edit', 'approve', 'reject', 'delete'] : ['edit', 'delete'];
   if (row.status === 'rejected') return ['edit', 'delete'];
-  return canDecide && row.paid === 0 && row.held === 0 ? ['reject'] : [];
+  if (!canDecide) return [];
+  const actions: ExpenseAction[] = [];
+  if (expenseLeft(row) > 0) actions.push('pay');
+  if (row.paid === 0 && row.held === 0) actions.push('reject');
+  return actions;
 }
 
 /** Who is given the expense form and the row menus: anyone who may edit data in a real workspace, never the demo. */
 export function canEditExpenses(role: OrgRole, isDemo: boolean): boolean {
   return !isDemo && can(role, 'edit-data');
+}
+
+/**
+ * What the Expenses screen reads and what it lets each person do, decided on the server and nowhere else. The form's
+ * contacts and categories are read only for someone who has the form; the accounts only for someone who may decide
+ * (an owner or admin, who also mark an expense paid), so a member, a viewer and the demo are handed none.
+ */
+export function expensesScreenPlan(role: OrgRole, isDemo: boolean) {
+  const canEdit = canEditExpenses(role, isDemo);
+  const canDecide = canEdit && can(role, 'sign-off-finance');
+  return { canEdit, canDecide, readsContacts: canEdit, readsCategories: canEdit, readsAccounts: canDecide };
+}
+
+/** Opening the Mark paid card for a row: its default date is the person's own date, read from their clock when they open it, never the server's. */
+export function payCardOpening(row: ExpenseRow, now: Date = new Date()) {
+  return { kind: 'pay' as const, today: localIsoDate(now), row };
+}
+
+/** The Mark paid card is drawn only for a writer who may decide, and only while it is the card that is open. */
+export function showsPayCard(writer: { canDecide: boolean } | undefined, openKind: string | undefined): boolean {
+  return Boolean(writer && writer.canDecide && openKind === 'pay');
 }
 
 /** True for the answers that mean the expense is no longer as the row showed it: the question is closed and the row refreshed. */
@@ -236,7 +272,7 @@ export function isPartPaid(row: ExpenseRow): boolean {
  */
 export function expensePaymentNote(row: ExpenseRow): string | null {
   if (row.display_status !== 'approved' || (row.paid === 0 && row.held === 0)) return null;
-  const left = Math.round((row.amount - row.paid - row.held) * 100) / 100;
+  const left = expenseLeft(row);
   const parts: string[] = [];
   if (row.paid > 0) parts.push(`${rm(row.paid)} paid`);
   if (row.held > 0) parts.push(`${rm(row.held)} to be paid`);

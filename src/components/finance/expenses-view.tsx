@@ -1,14 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { Ban, Check, Download, FileText, Pencil, PieChart, Plus, Search, Trash2, TrendingUp } from 'lucide-react';
+import { Ban, Banknote, Check, Download, FileText, Pencil, PieChart, Plus, Search, Trash2, TrendingUp } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { type ExpenseFormActions, ExpenseFormCard } from '@/components/finance/expense-form-card';
+import { type ExpensePayAction, ExpensePayCard } from '@/components/finance/expense-pay-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { SavedNoteCard } from '@/components/finance/saved-note-card';
+import { type AttachedReceiptLinkOf, AttachedReceipts } from '@/components/finance/attached-receipts';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
@@ -43,10 +45,15 @@ import {
   expensePaymentNote,
   expenseQuestion,
   isPartPaid,
+  payCardOpening,
+  showsPayCard,
   writtenExpenseTitle,
 } from '@/lib/finance/expense-form';
+import { type ExpensePaidNote, expensePaidText, expensePaidTitle, expensePayCurrent } from '@/lib/finance/expense-payment';
 import type { ExpenseCategory, ExpenseDisplayStatus, ExpenseRow } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
+import type { FinanceAccount } from '@/lib/finance/money';
+import type { ReceiptsByDocument } from '@/lib/finance/receipt-match';
 import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
@@ -55,17 +62,21 @@ export type ExpenseActions = ExpenseFormActions & {
   approve: (input: unknown) => Promise<FinResult<{ id: string }>>;
   reject: (input: unknown) => Promise<FinResult<{ id: string }>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** Marks an approved expense paid. Only ever called for someone who may decide. */
+  pay: ExpensePayAction;
 };
 
-/** What only a person who may edit is given: the actions, whether they may decide, and what the expense form offers. */
+/** What only a person who may edit is given: the actions, whether they may decide, and what the two cards offer. */
 export type ExpensesWriter = {
   actions: ExpenseActions;
-  /** True for an owner or admin: they approve and reject, and what they save is approved. */
+  /** True for an owner or admin: they approve, reject and mark paid, and what they save is approved. */
   canDecide: boolean;
   /** Active contacts, for the vendor. */
   contacts: { id: string; name: string }[];
   /** Active expense categories. */
   categories: ExpenseCategory[];
+  /** Active bank and cash accounts, for Mark paid; empty for someone who may not decide. */
+  accounts: FinanceAccount[];
 };
 
 const SPEND_SERIES: Series[] = [
@@ -80,9 +91,10 @@ const STATUS_STYLES: Record<ExpenseDisplayStatus, string> = {
   rejected: 'bg-red-500/15 text-red-600',
 };
 
-/** One thing open at a time: the expense form, new or for one expense, or a question in one row. */
+/** One thing open at a time: the expense form, new or for one expense, the Mark paid card for one expense, or a question in one row. */
 type Open =
   | { kind: 'form'; today: string; editing?: ExpenseRow }
+  | { kind: 'pay'; today: string; row: ExpenseRow }
   | { kind: 'approve' | 'reject' | 'delete'; row: ExpenseRow }
   | null;
 
@@ -91,17 +103,24 @@ type Open =
  * filters, "View all" and Export. A person who may edit (`writer`) also gets
  * New expense, and Edit and Delete on a pending or rejected expense; an owner
  * or admin also gets Approve and Reject on a pending one, and Reject on an
- * approved one that no payment stands against. Each row's menu holds only
- * what the database will let that person do (`expenseActions`).
+ * approved one that no payment stands against, and Mark paid on an approved
+ * one with anything left to pay. Each row's menu holds only what the database
+ * will let that person do (`expenseActions`).
  */
 export function ExpensesView({
   rows,
   today: serverToday,
   followClock = true,
+  receipts,
+  receiptLinkOf,
   writer,
 }: {
   /** Every expense, newest first; pending and rejected ones included. */
   rows: ExpenseRow[];
+  /** The receipts tied to each expense, by the expense's id, from the Receipts Inbox. Absent with no database. */
+  receipts?: ReceiptsByDocument;
+  /** Makes a one-minute link to a receipt's file, for anyone who can see it. */
+  receiptLinkOf?: AttachedReceiptLinkOf;
   /** The date the figures are worked out for, YYYY-MM-DD, until the browser's own date takes over. */
   today: string;
   /** False for sample data, which keeps its own fixed date. */
@@ -116,6 +135,8 @@ export function ExpensesView({
   const [open, setOpen] = useState<Open>(null);
   // The expense just saved, approved or rejected; whether to say anything about it is decided at render, from the rows listed now.
   const [written, setWritten] = useState<WrittenExpense | null>(null);
+  // The payment just recorded: it is a voucher, which shows on another screen, so the note is always shown.
+  const [paid, setPaid] = useState<ExpensePaidNote | null>(null);
   const confirm = useFinanceAction();
 
   const view = expensesView(rows, today);
@@ -130,9 +151,11 @@ export function ExpensesView({
     : null;
 
   const { newButton, actionsColumn, columns } = expenseControls(Boolean(writer));
-  const asking = open && open.kind !== 'form' ? open : null;
-  // The form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
-  const locked = confirm.pending || open?.kind === 'form';
+  const asking = open && open.kind !== 'form' && open.kind !== 'pay' ? open : null;
+  // A card holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
+  const locked = confirm.pending || open?.kind === 'form' || open?.kind === 'pay';
+  // The expense being paid, as the list has it now: a refresh may have moved what is left of it.
+  const paying = open?.kind === 'pay' ? expensePayCurrent(open.row, rows) : null;
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((e) => e.id === asking.row.id) : false;
 
@@ -140,6 +163,7 @@ export function ExpensesView({
   const ask = (next: Exclude<Open, null>) => {
     confirm.clear();
     setWritten(null);
+    setPaid(null);
     setOpen(next);
   };
   /** Forgets an earlier write when the list changes under a note that is not showing, so a note never turns up later by itself. */
@@ -179,6 +203,13 @@ export function ExpensesView({
         return { label: 'Reject', icon: Ban, destructive: true, opens: true, onSelect: () => ask({ kind: 'reject', row }) };
       case 'delete':
         return { label: 'Delete', icon: Trash2, destructive: true, opens: true, onSelect: () => ask({ kind: 'delete', row }) };
+      case 'pay':
+        return {
+          label: 'Mark paid',
+          icon: Banknote,
+          opens: true,
+          onSelect: () => ask(payCardOpening(row)),
+        };
     }
   };
 
@@ -295,9 +326,35 @@ export function ExpensesView({
             onClose={(saved) => (saved ? closeSaying(saved) : close())}
           />
         ) : null}
+        {open?.kind === 'pay' && showsPayCard(writer, open.kind) && writer && paying ? (
+          <ExpensePayCard
+            // A different expense is a different card.
+            key={paying.row.id}
+            row={paying.row}
+            gone={paying.gone}
+            accounts={writer.accounts}
+            today={open.today}
+            pay={writer.actions.pay}
+            onClose={(note) => {
+              close();
+              if (note) setPaid(note);
+            }}
+          />
+        ) : null}
         {written && hiddenNote ? (
           <SavedNoteCard title={writtenExpenseTitle(written)} subtitle="It is not in the list below" onClose={() => setWritten(null)}>
             {hiddenNote}
+          </SavedNoteCard>
+        ) : null}
+        {paid ? (
+          <SavedNoteCard
+            title={expensePaidTitle(paid, rows.find((e) => e.id === paid.expenseId))}
+            subtitle="Recorded as a payment voucher"
+            href="/finance/payment-vouchers"
+            linkLabel="Payment Vouchers"
+            onClose={() => setPaid(null)}
+          >
+            {expensePaidText(paid)}
           </SavedNoteCard>
         ) : null}
 
@@ -450,7 +507,10 @@ export function ExpensesView({
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(e.expense_date)}</TableCell>
                       <TableCell className="min-w-24 whitespace-normal break-words font-medium">{e.category_name}</TableCell>
                       {/* A long vendor name wraps; it is never cut off behind a tooltip. */}
-                      <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">{e.vendor_name}</TableCell>
+                      <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">
+                        {e.vendor_name}
+                        <AttachedReceipts receipts={receipts?.[e.id]} linkOf={receiptLinkOf} />
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">
                         <span className="whitespace-nowrap">{rm(e.amount)}</span>
                       </TableCell>
