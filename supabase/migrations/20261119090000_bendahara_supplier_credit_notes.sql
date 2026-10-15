@@ -212,7 +212,8 @@ begin
       if (to_jsonb(new) - 'status' - 'updated_at') is distinct from (to_jsonb(old) - 'status' - 'updated_at') then
         raise exception 'an issued supplier credit note cannot be changed' using errcode = 'FIN01';
       end if;
-      -- Lock the bill, so credit applied to it at the same moment is checked after this.
+      -- The note is locked (it is being updated), and now its bill, in the order the guard on applications
+      -- takes them: credit being applied at the same moment waits for this, then finds the note void (FIN04).
       perform 1 from public.supplier_bills where org_id = old.org_id and id = old.bill_id for update;
       if exists (
         select 1 from public.finance_supplier_credit_applications a
@@ -349,7 +350,7 @@ create trigger finance_supplier_credit_application_guard
 -- after it (its name sorts after finance_allocation_guard and before
 -- finance_allocation_still), holds payments and applied credit together to
 -- the total (FIN05). A bill with no credit on it is not read again.
-create or replace function private.finance_allocation_credit_guard()
+create or replace function private.finance_allocation_guard_credit()
 returns trigger
 language plpgsql
 set search_path = ''
@@ -380,17 +381,19 @@ begin
   end if;
   return new;
 end $$;
-revoke all on function private.finance_allocation_credit_guard() from public, anon, authenticated, service_role;
+revoke all on function private.finance_allocation_guard_credit() from public, anon, authenticated, service_role;
 
 create trigger finance_allocation_guard_credit
   before insert or update on public.finance_allocations
-  for each row execute function private.finance_allocation_credit_guard();
+  for each row execute function private.finance_allocation_guard_credit();
 
 -- ---- guard: a bill with credit stays in the books -----------------------------------
 -- A bill is voided only when no draft or issued note is against it and no
 -- credit is applied to it: otherwise its entry would be reversed and the
--- note's would not. Sorts before finance_bill_guard, which keeps its own rules.
-create or replace function private.finance_bill_credit_guard()
+-- note's would not. Sorts after finance_bill_guard and finance_bill_sign_off
+-- (so a person who may not void is answered FIN14 first) and before
+-- finance_void_stamp. finance_bill_guard keeps its own rules.
+create or replace function private.finance_bill_void_credit()
 returns trigger
 language plpgsql
 set search_path = ''
@@ -407,13 +410,13 @@ begin
   end if;
   return new;
 end $$;
-revoke all on function private.finance_bill_credit_guard() from public, anon, authenticated, service_role;
+revoke all on function private.finance_bill_void_credit() from public, anon, authenticated, service_role;
 
-create trigger finance_bill_credit_guard
+create trigger finance_bill_void_credit
   before update on public.supplier_bills
   for each row
   when (new.status = 'void' and old.status is distinct from 'void')
-  execute function private.finance_bill_credit_guard();
+  execute function private.finance_bill_void_credit();
 
 -- ---- views --------------------------------------------------------------------------
 -- supplier_bill_totals: explicit columns, the 12 that "b.*" fixed when the
@@ -1038,6 +1041,14 @@ begin
      and g.tgenabled = 'O' and (g.tgtype & 2) = 2;
   if names !~ '^(.*,)?finance_allocation_guard,finance_allocation_guard_credit,finance_allocation_still(,.*)?$' then
     raise exception 'the BEFORE triggers on finance_allocations are not in the order this file needs: %', names;
+  end if;
+
+  select string_agg(g.tgname, ',' order by g.tgname) into names
+    from pg_catalog.pg_trigger g
+   where g.tgrelid = 'public.supplier_bills'::regclass and not g.tgisinternal
+     and g.tgenabled = 'O' and (g.tgtype & 2) = 2;
+  if names !~ '^(.*,)?finance_bill_guard,(.*,)?finance_bill_sign_off,(.*,)?finance_bill_void_credit,finance_void_stamp$' then
+    raise exception 'the BEFORE triggers on supplier_bills are not in the order this file needs: %', names;
   end if;
 
   select string_agg(c.relname, ',' order by c.relname) into left_over

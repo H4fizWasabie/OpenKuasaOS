@@ -209,6 +209,7 @@ testWithSupabase('credit left over from a paid bill is applied to a later bill o
 
 testWithSupabase('voiding a note gives back what it took, unless its credit is on another bill', async () => {
   const a = await workspace('Supplier Credit D Sdn Bhd');
+  const paidFirst = await postedBill(a);
   const b1 = await postedBill(a);
   const n = await issuedNote(a, b1, 30);
   expect(await bill(a.c, b1)).toMatchObject({ credited: 30, balance: 102.5 });
@@ -217,9 +218,17 @@ testWithSupabase('voiding a note gives back what it took, unless its credit is o
   const voidBill = await a.c.from('supplier_bills').update({ status: 'void', updated_at: new Date().toISOString() }).eq('id', b1).select('id');
   expect(voidBill.error?.code).toBe('FIN40');
 
+  // An issued note keeps its bill and its stamp.
+  const moved = await a.c.from('finance_supplier_credit_notes').update({ bill_id: paidFirst }).eq('id', n.id).select('id');
+  expect(moved.error?.code).toBe('FIN01');
+  const stamped = await a.c.from('finance_supplier_credit_notes').update({ voided_at: new Date().toISOString() }).eq('id', n.id).select('id');
+  expect(stamped.error?.code).toBe('FIN01');
+
   expect((await voidNote(a, n.id)).error).toBeNull();
   expect(await bill(a.c, b1)).toMatchObject({ credited: 0, balance: 132.5 });
   expect(await note(a.c, n.id)).toMatchObject({ status: 'void', applied: 0, open_amount: 0 });
+  // A void note has no credit to give.
+  expect((await apply(a, n.id, b1, 10)).error?.code).toBe('FIN04');
 
   // Credit used on a later bill: refused until it is taken off that bill.
   const paid = await postedBill(a);
@@ -315,7 +324,10 @@ testWithSupabase('a member writes a draft, but issuing, voiding and applying cre
   const issue = await m.rpc('finance_issue_supplier_credit_note', { target_org: a.orgId, target_note: draft.data });
   expect(issue.error?.code).toBe('FIN14');
   const voided = await m.from('finance_supplier_credit_notes').update({ status: 'void' }).eq('id', owned.id).select('id');
-  expect(voided.error?.code ?? (voided.data?.length === 0 ? 'none' : 'changed')).not.toBe('changed');
+  expect(voided.error?.code).toBe('FIN14');
+  // Nor may a member void a bill; the sign-off answers before the credit rule does.
+  const voidBill = await m.from('supplier_bills').update({ status: 'void' }).eq('id', b1).select('id');
+  expect(voidBill.error?.code).toBe('FIN14');
   const applied = await m
     .from('finance_supplier_credit_applications')
     .insert({ org_id: a.orgId, credit_note_id: owned.id, bill_id: b1, amount: 10 });
