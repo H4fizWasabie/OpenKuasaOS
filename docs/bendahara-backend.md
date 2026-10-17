@@ -1793,7 +1793,7 @@ can still be; a void one offers nothing.
 
 ## Supplier credit notes
 
-`20261119090000_bendahara_supplier_credit_notes` (tables and rules only; the
+`20261120090000_bendahara_supplier_credit_notes` (tables and rules only; the
 screen is not built yet). A supplier credit note is one
 `finance_supplier_credit_notes` row: one amount against one posted supplier bill,
 a `reason` (`overpaid`, `returned_goods`, `short_delivery`, `other`), the
@@ -1808,7 +1808,7 @@ how much of a note (`credit_note_id`, `bill_id`, `amount`; one row per note and
 bill). On issue the note is applied to its own bill, up to what that bill still
 owes: its total, less payments (posted, or waiting to be paid) and credit
 already on it. What is left stays open on the supplier, and an owner or admin
-applies it to a later posted bill of the same supplier (`FIN39` for another
+applies it to a later posted bill of the same supplier (`FIN42` for another
 supplier's bill). The applications of a note never exceed the note, and the
 payments and credit on a bill never exceed its total (`FIN05`): the guard on
 applications checks the second from the credit side, and
@@ -1834,9 +1834,14 @@ A void posts a reversal on the day it was voided, as for the other documents.
 **Void.** Issuing and voiding need an owner or admin (`FIN14`), as do putting
 credit on a bill and taking it off. A note is voided only while its credit is on
 its own bill alone; voiding takes that off again, so the bill owes it. If the
-credit has been used on another bill, take it off that bill first (`FIN38`). A
+credit has been used on another bill, take it off that bill first (`FIN41`). A
 bill cannot be voided while a draft or issued note is against it, or while
-credit is applied to it (`FIN40`).
+credit is applied to it (`FIN43`).
+
+**With contra entries.** `supplier_bill_totals` keeps its `set_off` column and takes both it and
+`credited` off `balance`. Payments, posted contra entries and applied credit together may not pass a
+bill's total (`FIN05`): `finance_supplier_credit_application_guard`, `finance_allocation_guard_credit`
+and `finance_contra_guard_credit` each count the other two.
 
 ## Refunds
 
@@ -2222,9 +2227,9 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN32` | An invoice or bill that a posted contra entry sets off is not voided. `bills.ts` and `invoices.ts`: "A contra entry sets this off. Void the contra entry first." |
 | `FIN33` | Refunds on an invoice depend on a contra entry, so it is not voided. `contras.ts` |
 | `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map; `transfers.ts` words it as it words `FIN16`. A member recording a payment in, a refund or a paid-now payment out on an archived account is answered `FIN37` (the draft is refused before the sign-off rule), where before this rule they were answered `FIN14`; posting, approving and marking paid by a member still answer `FIN14`. |
-| `FIN38` | A supplier credit note cannot be voided while its credit is used on another bill: take it off that bill first |
-| `FIN39` | Credit can only be applied to a bill from the same supplier as the credit note |
-| `FIN40` | A bill with a draft or issued supplier credit note against it, or with credit applied to it, cannot be voided |
+| `FIN41` | A supplier credit note cannot be voided while its credit is used on another bill: take it off that bill first |
+| `FIN42` | Credit can only be applied to a bill from the same supplier as the credit note |
+| `FIN43` | A bill with a draft or issued supplier credit note against it, or with credit applied to it, cannot be voided |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with

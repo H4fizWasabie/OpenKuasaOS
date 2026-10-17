@@ -26,17 +26,17 @@
 --   * a note goes against a posted bill, and all the issued notes of a bill
 --     together never exceed the bill's total (FIN04, FIN05);
 --   * the applications of a note never exceed the note, go only to a posted
---     bill of the same supplier (FIN04, FIN39), and the payments and credit on
+--     bill of the same supplier (FIN04, FIN42), and the payments and credit on
 --     a bill never exceed its total (FIN05);
 --   * a note is voided only while its credit is used on nothing but its own
---     bill; voiding takes that off again (FIN38). To void one whose credit was
+--     bill; voiding takes that off again (FIN41). To void one whose credit was
 --     used on a later bill, take it off that bill first;
 --   * a bill cannot be voided while a draft or issued note is against it, or
---     while credit is applied to it (FIN40);
+--     while credit is applied to it (FIN43);
 --   * issuing and voiding a note, applying credit and taking it off need an
 --     owner or admin, as posting and voiding a bill do (FIN14).
 --
--- Error codes: FIN38, FIN39, FIN40 are new (the highest before this file is FIN37).
+-- Error codes: FIN41, FIN42, FIN43 are new (the highest before this file is FIN40).
 
 -- Fail fast instead of queueing behind a long transaction and stalling sign-ins.
 set local lock_timeout = '5s';
@@ -45,10 +45,10 @@ set local lock_timeout = '5s';
 alter table public.finance_sequences
   drop constraint finance_sequences_doc_type_check,
   add constraint finance_sequences_doc_type_check
-    check (doc_type in ('invoice','quotation','credit_note','bill','receipt','voucher','transfer','rfq','purchase_order','journal','supplier_credit_note'));
+    check (doc_type in ('invoice','quotation','credit_note','bill','receipt','voucher','transfer','rfq','purchase_order','journal','contra','supplier_credit_note'));
 
--- The body of 20261108093000_bendahara_journals.sql with one line added:
--- 'supplier_credit_note' gives 'SCN-'. It stays "security definer".
+-- The body of 20261119100000_bendahara_contra_entries.sql (the newest on main) with
+-- one line added: 'supplier_credit_note' gives 'SCN-'. It stays "security definer".
 create or replace function public.finance_next_number(target_org uuid, doc text)
 returns text
 language plpgsql
@@ -75,6 +75,7 @@ begin
     when 'rfq' then 'RFQ-'
     when 'purchase_order' then 'PO-'
     when 'journal' then 'JV-'
+    when 'contra' then 'CT-'
     when 'supplier_credit_note' then 'SCN-'
   end;
   if default_prefix is null then
@@ -219,7 +220,7 @@ begin
         select 1 from public.finance_supplier_credit_applications a
         where a.org_id = old.org_id and a.credit_note_id = old.id and a.bill_id <> old.bill_id
       ) then
-        raise exception 'the credit has been used on another bill; take it off that bill first' using errcode = 'FIN38';
+        raise exception 'the credit has been used on another bill; take it off that bill first' using errcode = 'FIN41';
       end if;
       -- What it took off its own bill is owed again.
       delete from public.finance_supplier_credit_applications
@@ -288,6 +289,7 @@ declare
   total numeric;
   held numeric;
   credited numeric;
+  set_off numeric;
 begin
   -- Lock the note, so it cannot be voided while this is checked.
   select status, amount, bill_id into note from public.finance_supplier_credit_notes
@@ -311,7 +313,7 @@ begin
   end if;
   select supplier_id into home from public.supplier_bills where org_id = new.org_id and id = note.bill_id;
   if target.supplier_id is distinct from home then
-    raise exception 'credit can only be applied to a bill from the same supplier' using errcode = 'FIN39';
+    raise exception 'credit can only be applied to a bill from the same supplier' using errcode = 'FIN42';
   end if;
 
   select coalesce(sum(amount), 0) into used
@@ -332,7 +334,12 @@ begin
   select coalesce(sum(amount), 0) into credited
   from public.finance_supplier_credit_applications
   where org_id = new.org_id and bill_id = new.bill_id;
-  if held + credited + new.amount > total then
+  -- Posted contra entries (20261119100000) set off part of the bill as well.
+  select coalesce(sum(cl.amount), 0) into set_off
+  from public.finance_contra_lines cl
+  join public.finance_contras k on k.org_id = cl.org_id and k.id = cl.contra_id
+  where cl.org_id = new.org_id and cl.bill_id = new.bill_id and k.status = 'posted';
+  if held + credited + set_off + new.amount > total then
     raise exception 'more than is still owed on the bill' using errcode = 'FIN05';
   end if;
   return new;
@@ -349,7 +356,9 @@ create trigger finance_supplier_credit_application_guard
 -- the bill and held payments to the bill's total. This one, firing right
 -- after it (its name sorts after finance_allocation_guard and before
 -- finance_allocation_still), holds payments and applied credit together to
--- the total (FIN05). A bill with no credit on it is not read again.
+-- the total (FIN05), together with any posted contra entry on the bill (whose
+-- own cap, finance_allocation_less_contra, does not know credit). A bill with
+-- no credit on it is not read again.
 create or replace function private.finance_allocation_guard_credit()
 returns trigger
 language plpgsql
@@ -359,6 +368,7 @@ declare
   credited numeric;
   total numeric;
   held numeric;
+  set_off numeric;
 begin
   if new.bill_id is null then
     return new;
@@ -376,7 +386,11 @@ begin
   join public.finance_transactions x on x.org_id = a.org_id and x.id = a.transaction_id
   where a.org_id = new.org_id and a.bill_id = new.bill_id and a.id <> new.id
     and x.status in ('draft','pending_approval','scheduled','posted');
-  if held + credited + new.amount > total then
+  select coalesce(sum(cl.amount), 0) into set_off
+  from public.finance_contra_lines cl
+  join public.finance_contras k on k.org_id = cl.org_id and k.id = cl.contra_id
+  where cl.org_id = new.org_id and cl.bill_id = new.bill_id and k.status = 'posted';
+  if held + credited + set_off + new.amount > total then
     raise exception 'more than is still owed on the bill' using errcode = 'FIN05';
   end if;
   return new;
@@ -386,6 +400,53 @@ revoke all on function private.finance_allocation_guard_credit() from public, an
 create trigger finance_allocation_guard_credit
   before insert or update on public.finance_allocations
   for each row execute function private.finance_allocation_guard_credit();
+
+-- ---- guard: a contra entry counts the credit on its bills ---------------------------
+-- An addition to private.finance_contra_guard (20261119100000), which is not
+-- replaced: when a contra entry is posted it holds payments and other contra
+-- entries to each bill's total, and does not know credit. This one, firing
+-- after it (its name sorts after finance_contra_guard), adds the credit applied
+-- to the bill. The bills are already locked "for update" by that guard.
+create or replace function private.finance_contra_guard_credit()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  l record;
+begin
+  for l in
+    select cl.bill_id, b.bill_no,
+           (select coalesce(sum(bl.amount + bl.sst_amount), 0) from public.supplier_bill_lines bl
+             where bl.org_id = cl.org_id and bl.bill_id = cl.bill_id)
+         - (select coalesce(sum(a.amount), 0) from public.finance_allocations a
+             join public.finance_transactions x on x.org_id = a.org_id and x.id = a.transaction_id
+             where a.org_id = cl.org_id and a.bill_id = cl.bill_id
+               and x.status in ('draft','pending_approval','scheduled','posted'))
+         - (select coalesce(sum(o.amount), 0) from public.finance_contra_lines o
+             join public.finance_contras k on k.org_id = o.org_id and k.id = o.contra_id
+             where o.org_id = cl.org_id and o.bill_id = cl.bill_id and k.status = 'posted')
+         - (select coalesce(sum(ca.amount), 0) from public.finance_supplier_credit_applications ca
+             where ca.org_id = cl.org_id and ca.bill_id = cl.bill_id) as room,
+           cl.amount
+    from public.finance_contra_lines cl
+    join public.supplier_bills b on b.org_id = cl.org_id and b.id = cl.bill_id
+    where cl.org_id = new.org_id and cl.contra_id = new.id and cl.bill_id is not null
+  loop
+    -- This entry is still a draft in the table, so its own lines are not in "room".
+    if l.amount > l.room then
+      raise exception 'more than is still owed on bill %', l.bill_no using errcode = 'FIN05';
+    end if;
+  end loop;
+  return new;
+end $$;
+revoke all on function private.finance_contra_guard_credit() from public, anon, authenticated, service_role;
+
+create trigger finance_contra_guard_credit
+  before update on public.finance_contras
+  for each row
+  when (old.status = 'draft' and new.status = 'posted')
+  execute function private.finance_contra_guard_credit();
 
 -- ---- guard: a bill with credit stays in the books -----------------------------------
 -- A bill is voided only when no draft or issued note is against it and no
@@ -406,7 +467,7 @@ begin
     select 1 from public.finance_supplier_credit_applications a
     where a.org_id = old.org_id and a.bill_id = old.id
   ) then
-    raise exception 'a bill with a supplier credit note or credit on it cannot be voided' using errcode = 'FIN40';
+    raise exception 'a bill with a supplier credit note or credit on it cannot be voided' using errcode = 'FIN43';
   end if;
   return new;
 end $$;
@@ -419,11 +480,10 @@ create trigger finance_bill_void_credit
   execute function private.finance_bill_void_credit();
 
 -- ---- views --------------------------------------------------------------------------
--- supplier_bill_totals: explicit columns, the 12 that "b.*" fixed when the
--- view was made (20261013100000) and then the same five as before, in the same
--- order and types, so "create or replace" keeps the view, its grants and what
--- reads it. "credited" is new, at the end. balance and display_status take
--- applied credit off; paid is still only posted money out.
+-- supplier_bill_totals: the text 20261119100000 (contra entries) gave it, with
+-- "credited" appended after its "set_off", so "create or replace" keeps the
+-- view, its grants and what reads it. balance and display_status take applied
+-- credit off as well as set-off; paid is still only posted money out.
 create or replace view public.supplier_bill_totals with (security_invoker = true) as
 select
   b.id, b.org_id, b.bill_no, b.supplier_ref, b.supplier_id, b.bill_date, b.due_date,
@@ -431,14 +491,15 @@ select
   c.name as supplier_name,
   coalesce(l.total, 0)::numeric(14,2) as total,
   coalesce(p.paid, 0)::numeric(14,2) as paid,
-  (coalesce(l.total, 0) - coalesce(p.paid, 0) - coalesce(k.credited, 0))::numeric(14,2) as balance,
+  (coalesce(l.total, 0) - coalesce(p.paid, 0) - coalesce(sc.set_off, 0) - coalesce(k.credited, 0))::numeric(14,2) as balance,
   case
     when b.status in ('draft','void') then b.status
     -- A posted bill with no lines yet has nothing to pay; it is not Paid.
-    when coalesce(l.total, 0) > 0 and coalesce(l.total, 0) - coalesce(p.paid, 0) - coalesce(k.credited, 0) <= 0 then 'paid'
+    when coalesce(l.total, 0) > 0 and coalesce(l.total, 0) - coalesce(p.paid, 0) - coalesce(sc.set_off, 0) - coalesce(k.credited, 0) <= 0 then 'paid'
     when b.due_date < current_date then 'overdue'
     else 'pending'
   end as display_status,
+  coalesce(sc.set_off, 0)::numeric(14,2) as set_off,
   coalesce(k.credited, 0)::numeric(14,2) as credited
 from public.supplier_bills b
 join public.finance_contacts c on c.org_id = b.org_id and c.id = b.supplier_id
@@ -454,6 +515,13 @@ left join lateral (
   join public.finance_transactions t on t.org_id = a.org_id and t.id = a.transaction_id
   where a.org_id = b.org_id and a.bill_id = b.id and t.direction = 'out' and t.status = 'posted'
 ) p on true
+left join lateral (
+  -- Posted contra entries against the bill: settled with no money moving.
+  select sum(cl.amount) as set_off
+  from public.finance_contra_lines cl
+  join public.finance_contras ce on ce.org_id = cl.org_id and ce.id = cl.contra_id
+  where cl.org_id = b.org_id and cl.bill_id = b.id and ce.status = 'posted'
+) sc on true
 left join lateral (
   -- Credit from issued notes put on this bill. A note that is voided has none left on a bill.
   select sum(a.amount) as credited
@@ -539,8 +607,8 @@ revoke all on public.finance_purchase_order_totals from anon, authenticated, ser
 grant select on public.finance_purchase_order_totals to authenticated;
 
 -- ---- the ledger ---------------------------------------------------------------------
--- finance_ledger_lines, replaced: the text 20261111090000 gave it, with one
--- more kind of entry, the supplier credit note. The same ten columns with the
+-- finance_ledger_lines, replaced: the text 20261119100000 (contra entries) gave it,
+-- with one more kind of entry, the supplier credit note. The same ten columns with the
 -- same types, so "create or replace" keeps the view and everything that reads
 -- it (finance_ledger_balances). An issued note debits Accounts Payable and
 -- credits the bill's category (SST on a purchase is part of the cost, so the
@@ -884,6 +952,37 @@ from (
 
   union all
 
+  -- ---- contra entry: posted, or voided after it was posted ---------------------------
+  -- 20261119100000. A contra entry sets off what a contact owes on invoices
+  -- against what is owed to them on bills, with no money moving: Accounts
+  -- Payable goes down (debit) and Accounts Receivable goes down (credit) by
+  -- the same amount. Mirrors finance_invoice_totals and supplier_bill_totals,
+  -- which take posted contra lines off each document's balance; the guard on
+  -- contra entries posts one only when its invoice lines and its bill lines
+  -- each add up to its amount, so the entry's one amount is what both views
+  -- took off. No line names a bank or cash account, so the Cash Flow and
+  -- every bank balance are untouched. A voided one is reversed on the day it
+  -- was voided by the outer query, as every other void.
+  select
+    k.org_id,
+    'contra:' || k.id::text,
+    k.contra_date,
+    'contra'::text,
+    k.id,
+    k.contra_no,
+    concat_ws(' ', 'Contra', k.contra_no, 'with ' || ct.name),
+    case when k.status = 'void' then (k.voided_at at time zone 'UTC')::date end,
+    v.acct, v.sys, v.bank, v.cat, v.dflt, v.debit, v.credit
+  from public.finance_contras k
+  left join public.finance_contacts ct on ct.org_id = k.org_id and ct.id = k.contact_id
+  cross join lateral (values
+    (null::uuid, 'payable'::text, null::uuid, null::uuid, null::text, k.amount::numeric, 0::numeric),
+    (null::uuid, 'receivable'::text, null::uuid, null::uuid, null::text, 0::numeric, k.amount::numeric)
+  ) as v(acct, sys, bank, cat, dflt, debit, credit)
+  where k.status = 'posted' or (k.status = 'void' and k.voided_at is not null)
+
+  union all
+
   -- ---- manual journal: posted ---------------------------------------------------------
   -- As entered. The guard on journals refused to post it unless its debits
   -- equalled its credits, and a posted journal's lines cannot change. A
@@ -1005,6 +1104,9 @@ begin
                       and x.status in ('draft','pending_approval','scheduled','posted')), 0)
        - coalesce((select sum(k.amount) from public.finance_supplier_credit_applications k
                     where k.org_id = target_org and k.bill_id = c.bill_id), 0)
+       - coalesce((select sum(cl.amount) from public.finance_contra_lines cl
+                    join public.finance_contras ce on ce.org_id = cl.org_id and ce.id = cl.contra_id
+                    where cl.org_id = target_org and cl.bill_id = c.bill_id and ce.status = 'posted'), 0)
     into room;
   put := least(c.amount, room);
   if put > 0 then
@@ -1039,7 +1141,7 @@ begin
     from pg_catalog.pg_trigger g
    where g.tgrelid = 'public.finance_allocations'::regclass and not g.tgisinternal
      and g.tgenabled = 'O' and (g.tgtype & 2) = 2;
-  if names !~ '^(.*,)?finance_allocation_guard,finance_allocation_guard_credit,finance_allocation_still(,.*)?$' then
+  if names !~ '^(.*,)?finance_allocation_guard,finance_allocation_guard_credit,(finance_allocation_less_contra,)?finance_allocation_still(,.*)?$' then
     raise exception 'the BEFORE triggers on finance_allocations are not in the order this file needs: %', names;
   end if;
 

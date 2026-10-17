@@ -3,7 +3,7 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
-// Supplier credit notes against the hosted database (20261119090000): the
+// Supplier credit notes against the hosted database (20261120090000): the
 // note, its credit on a bill, the figures that follow, the books. Every
 // workspace is made through tests/helpers/live-workspaces.ts, which deletes
 // what it creates.
@@ -178,7 +178,7 @@ testWithSupabase('credit left over from a paid bill is applied to a later bill o
   const draft = await draftBill(a);
   const otherSupplier = await postedBill(a, a.other);
   expect((await apply(a, n.id, draft, 10)).error?.code).toBe('FIN04');
-  expect((await apply(a, n.id, otherSupplier, 10)).error?.code).toBe('FIN39');
+  expect((await apply(a, n.id, otherSupplier, 10)).error?.code).toBe('FIN42');
   expect((await apply(a, n.id, later, 30.01)).error?.code).toBe('FIN05');
   const applied = await apply(a, n.id, later, 30);
   expect(applied.error, applied.error?.message).toBeNull();
@@ -216,7 +216,7 @@ testWithSupabase('voiding a note gives back what it took, unless its credit is o
 
   // A bill with a note, or credit, on it is not voided.
   const voidBill = await a.c.from('supplier_bills').update({ status: 'void', updated_at: new Date().toISOString() }).eq('id', b1).select('id');
-  expect(voidBill.error?.code).toBe('FIN40');
+  expect(voidBill.error?.code).toBe('FIN43');
 
   // An issued note keeps its bill and its stamp.
   const moved = await a.c.from('finance_supplier_credit_notes').update({ bill_id: paidFirst }).eq('id', n.id).select('id');
@@ -237,10 +237,10 @@ testWithSupabase('voiding a note gives back what it took, unless its credit is o
   const later = await postedBill(a);
   const used = await apply(a, m.id, later, 40);
   expect(used.error, used.error?.message).toBeNull();
-  expect((await voidNote(a, m.id)).error?.code).toBe('FIN38');
+  expect((await voidNote(a, m.id)).error?.code).toBe('FIN41');
   // The later bill carries credit, so it is not voided either.
   const voidLater = await a.c.from('supplier_bills').update({ status: 'void', updated_at: new Date().toISOString() }).eq('id', later).select('id');
-  expect(voidLater.error?.code).toBe('FIN40');
+  expect(voidLater.error?.code).toBe('FIN43');
 
   const off = await a.c.from('finance_supplier_credit_applications').delete().eq('id', used.data![0].id);
   expect(off.error).toBeNull();
