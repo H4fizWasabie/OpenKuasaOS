@@ -58,13 +58,14 @@ describe('quotation reads', () => {
   const row = (n: number, extra: Record<string, unknown> = {}) => ({
     id: `qt-${n}`, quotation_no: `QT-${n}`, customer_id: 'c1', customer_name: 'Aisyah Trading',
     quote_date: '2026-10-01', valid_until: '2026-10-31', total: '132.50', display_status: 'sent',
-    accepted_at: null, invoice_id: null, invoice_no: null, ...extra,
+    accepted_at: null, invoice_id: null, invoice_no: null,
+    currency: 'MYR', fx_rate: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: '132.50', ...extra,
   });
   /** The row as the data layer hands it on: `accepted_at` becomes the date `accepted_on`. */
   const read = (n: number, extra: Record<string, unknown> = {}) => {
     const rest: Record<string, unknown> = { ...row(n) };
     delete rest.accepted_at;
-    return { ...rest, total: 132.5, accepted_on: null, ...extra };
+    return { ...rest, total: 132.5, fx_rate: 1, total_myr: 132.5, accepted_on: null, ...extra };
   };
 
   it('lists from the totals view, in the caller’s workspace, newest first, with the total as a number', async () => {
@@ -126,8 +127,10 @@ describe('quotation writes', () => {
   it('saves through the database function, in the caller’s workspace', async () => {
     const { ctx, calls } = fakeFinance({ data: ID, error: null });
     expect(await saveQuotation(ctx, { ...valid, id: ID })).toEqual({ ok: true, data: { id: ID } });
-    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_save_quotation' });
-    expect(calls[0].args).toEqual({
+    // An existing draft sent with no currency: its own currency is read first (for the whole-units rule).
+    expect(calls[0]).toMatchObject({ kind: 'table', name: 'finance_quotations' });
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_save_quotation' });
+    expect(calls[1].args).toEqual({
       target_org: 'org-1',
       quotation: { id: ID, customer_id: CUSTOMER, quote_date: '2026-10-01', valid_until: '2026-10-31', notes: null },
       lines: [{ product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0, discount_pct: null, discount_amount: null }],

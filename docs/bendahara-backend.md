@@ -196,7 +196,7 @@ policy.
 `select public.finance_next_number(target_org, doc)` with `doc` set to
 `'invoice'` returns the next number (`INV-0001`) and moves the counter on. It locks the workspace's row for that
 type, so simultaneous callers never get the same number. Types: `invoice`,
-`quotation`, `credit_note`, `supplier_credit_note`, `bill`, `receipt`, `voucher`, `transfer`. Call it from inside
+`quotation`, `credit_note`, `supplier_credit_note`, `bill`, `receipt`, `voucher`, `transfer`, `contra` (`CT-0001`, taken when a contra entry is posted). Call it from inside
 the database function that posts a document, so a failed post does not use up a
 number.
 
@@ -1612,6 +1612,41 @@ wrong, unset or shorter than 32 characters.
 accounts, which the bucket refuses, so the demo has no upload area and a
 sentence saying why.
 
+## Exchange rates
+
+Stage 1 of multi-currency. `finance_fx_rates` holds Bank Negara Malaysia's
+published rates, one row per currency, rate date and session, shared by every
+workspace; `finance_fx_latest_rates` is the newest 1700 rate of each currency
+(it reads as its caller); `finance_fx_fetch_state` is the route's memory (when
+it last asked BNM, and the next month each currency's back-fill will fetch).
+Every signed-in person reads the rates; nobody signed in does. Only
+`service_role` writes them, and only by INSERT: it has no update, delete or
+truncate, so a stored rate never changes under a document that used it. The
+three relations are the only finance ones `service_role` holds anything on
+(`bendahara_archived_account_check.sql` names them as its exceptions).
+
+`POST /api/finance/fx-rates/fetch` (`fetchFxRates`) must be called by the
+operator's scheduler, authorized like the other scheduled endpoints
+(`isTriggerAuthorized`; a `401` means the secret is wrong, unset or shorter
+than 32 characters). It reads nothing from the request, reaches BNM only when
+a rate is missing (the one network call is `bnmGet`), spends at most 20
+seconds and 30 requests a call, and resumes its back-fill on the next call. It
+answers `{"ok", "stored", "pending"}`: how many rates it stored and how many
+currency back-fills are left. `ok: false` with status 200 means something was
+left for the next call; status 500 `{"ok":false,"stored":0,"pending":null}`
+means the state or the rates table could not be read or written. Neither is
+an alert unless it stays so for many calls in a row.
+
+Retry rule: after 17:30 Malaysian time, Monday to Friday, at most once an hour
+until that day's rate is stored (a public holiday costs about seven calls);
+never on a Saturday or Sunday once rates exist. Call it every few minutes or
+hourly; it does nothing when nothing is missing.
+
+The "Exchange rates" card on Banking is read-only and is drawn only for a
+workspace that deals in another currency (`workspaceUsesForeignCurrency`).
+Stage 1 adds no currency to any contact or document, so that is false for
+every workspace and the card is never drawn; stage 2 implements the check.
+
 ## Invoices
 
 A sales invoice is a `finance_invoices` row with its lines in
@@ -1953,6 +1988,110 @@ Triggers enforce it, so no caller can get round it:
   expense: the column is closed.
 - Each guard steps aside when the workspace itself is being deleted.
 
+## Contra entries
+
+`20261119100000_bendahara_contra_entries` (issue #223). A contact who is both a
+customer and a supplier owes us on invoices while we owe them on bills. A
+contra entry sets the two off against each other: it lowers what each chosen
+invoice and bill still owes, as a payment would, with no bank account
+involved. It is a draft, then posted (`CT-0001`), then, if need be, voided; a
+posted one is never edited. The owner's decisions: it is within one contact
+(`is_customer and is_supplier`); either side may be partial, and what is set
+off on the invoices equals what is set off on the bills and the contra's
+amount; a reference and a note are enough, no attachment; one contra may name
+several invoices and several bills.
+
+**No customer or supplier statement exists** in the code (the only
+"statements" are the financial statements in `reports.ts`). Until one is
+built, a contra shows as its own line on the Contra Entries screen (stage 2),
+in the ledger, in each invoice's and bill's balance, and in Customers &
+Suppliers and the aged tables, which sum `balance`. A future statement reads
+`finance_contra_lines` joined to `finance_contras` (posted, and void with its
+reversal on `voided_at`).
+
+Tables. `finance_contras` (contact, date, amount, reference, notes, status
+`draft`/`posted`/`void`, `contra_no`, `posted_by`, `posted_at`, `voided_at`)
+and `finance_contra_lines` (one line per invoice or bill: exactly one of
+`invoice_id` and `bill_id`, an amount; no update, the save function replaces a
+draft's lines). Every member reads both; only an owner or admin writes, for
+drafts too (owner's decision D1). `contra_no`, `created_by`, `posted_by`,
+`posted_at` and `voided_at` are closed to a signed-in person by column grants.
+Neither table is granted to `service_role`.
+
+Functions (all `security invoker`; each begins by asking
+`private.finance_may_sign_off`, so anyone else gets `FIN14`):
+
+| Function | Does | Returns |
+|---|---|---|
+| `finance_save_contra(target_org, contra jsonb, lines jsonb)` | Creates a draft, or with `contra.id` replaces a draft's header and lines. `contra`: `id`, `contact_id`, `contra_date`, `amount`, `reference`, `notes`; each line: `invoice_id` or `bill_id`, `amount`. A draft may be unfinished. | the id |
+| `finance_post_contra(target_org, target_contra)` | Posts a draft; every rule is `private.finance_contra_guard`'s | the number |
+| `finance_void_contra(target_org, target_contra)` | Voids a posted one | nothing |
+
+What a post asks, in the guard's order: the contact is both a customer and a
+supplier (`FIN31`); at least one invoice and one bill, and each side adds up
+to the amount (`FIN29`); the invoices and bills belong to the contact
+(`FIN31`) and are posted (`FIN04`); no line is more than the invoice still
+owes after money in that is recorded but not posted (`FIN05`), or more than
+the bill is worth less every payment not rejected or void and every posted
+contra (`FIN05`). The number is then taken in the same transaction. A void asks
+that no refund depends on the set-off (`FIN33`), the rule an issued credit
+note has.
+
+Error codes: `FIN29` the amounts do not add up; `FIN31` one contact who is both
+customer and supplier, and that contact's own documents; `FIN32` an invoice or
+bill that a posted contra sets off is not voided; `FIN33` refunds depend on
+this contra entry, so it is not voided. `FIN01`, `FIN04`, `FIN05`, `FIN11` and
+`FIN14` keep their usual meaning.
+
+What it moves. `finance_invoice_totals` and `supplier_bill_totals` gained a
+last column, `set_off` (posted contra lines on the document); `balance` (and
+`display_status`) subtract it, and `paid` stays money only, so Kasturi
+Billings' "received" is still cash. The ledger gained the source `contra`
+(`finance_ledger_lines`, key `contra:<id>`): debit Accounts Payable, credit
+Accounts Receivable by the amount, and, once voided, the reverse on the day
+it was voided (the database's UTC date, as every void). Nothing is written to
+`finance_transactions` or `finance_allocations`, so no bank balance, Banking
+line or Cash Flow figure moves.
+
+Triggers beside the live guards. `finance_allocation_less_contra` on
+`finance_allocations` (after `finance_allocation_guard`, before
+`finance_allocation_still`): a payment on a bill is never more than the bill
+less its posted contras (`FIN05`). `finance_invoice_void_contra` and
+`finance_bill_void_contra` (after the table's `_sign_off`, before
+`finance_void_stamp`): a document a posted contra names is not voided
+(`FIN32`). On `finance_contras`: `finance_contra_guard` and `finance_void_stamp`;
+on `finance_contra_lines`: `finance_contra_line_guard`. The lists now read
+`finance_allocations`: `finance_allocation_guard`, `finance_allocation_less_contra`,
+`finance_allocation_still`; `finance_invoices`: `finance_invoice_guard`,
+`finance_invoice_sign_off`, `finance_invoice_void_contra`, `finance_void_stamp`;
+`supplier_bills`: `finance_bill_category`, `finance_bill_guard`,
+`finance_bill_po_link`, `finance_bill_sign_off`, `finance_bill_void_contra`,
+`finance_void_stamp`.
+
+Limits. A draft contra holds nothing: a payment can take what a draft named,
+and the post then answers `FIN05`. The credit note guard reads `paid`, which a
+set-off does not change, so it may refuse to void a credit note on a set-off
+invoice that refunds do not depend on, and never allows one it should refuse.
+Posting with nobody signed in (a migration) asks no rule, as for journals. No
+activity-log line is written on post or void.
+
+The screen. Contra Entries (`src/screens/finance/contra-entries.tsx`,
+`contras-view.tsx`, `contra-form-card.tsx`, rules in `contra-form.ts`) lists
+every contra entry with search, a status filter and Export for everybody. An
+owner or admin also gets New contra entry and, by status, Edit, Post and
+Delete on a draft and Void on a posted one; a member reads and is told only an
+owner or admin records them; a viewer and the demo workspace read. The form
+offers each invoice for what it owes less money in recorded but not posted,
+and each bill for what it owes less payments not yet paid (`receivableInvoices`
+and `payableBills`), which is what a post asks. The five actions in
+`src/app/(app)/finance/actions.ts` refuse anyone who is not an owner or admin
+before anything is read; saving or deleting a draft refreshes Contra Entries
+only, and posting or voiding refreshes every screen that shows what an invoice
+or bill owes, Customers & Suppliers and the three ledger screens, not Banking.
+Invoices and Supplier Bills say "Set off RM x" under a balance a contra entry
+lowered, and the invoices export has a Set off column. The assistant reads
+them with `listContraEntries`; it has no tool that writes one.
+
 ## Database functions
 
 Most run as the caller, so RLS decides who may write. Eight run as their
@@ -2077,7 +2216,11 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
 | `FIN25` | A void bill takes no receipt. `receipt-match.ts`: "A void bill takes no receipt. Choose another bill." |
 | `FIN28` | A payment that has left draft is held still (`20261117090000`): none of its direction, account, date, amount, method, reference, payee, category or notes changes (the date may, as a scheduled payment is marked paid); it does not go back to draft, whoever asks; and its split is not added to, taken from, moved or edited. Raised only for a scheduled payment nobody had to approve: every other payment that is not a draft answers `FIN09` or `FIN14` first. `result.ts` has a sentence for it (`HELD_STILL`); no data layer lists it, because no write of the app can meet it. |
+| `FIN29` | A contra entry's amounts do not add up (`20261119100000`): an amount above zero, at least one invoice and one bill, each side adding up to the amount. `contras.ts`: "Enter an amount above zero for the contra entry and for each invoice and bill." at save, "Before posting, choose at least one invoice and one bill, and make each side add up to the contra entry's amount." at post |
 | `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin, or an owner who has not given their second factor: "Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step." The guard counts payments in both directions; the screen's archive question warns about money out only.) |
+| `FIN31` | A contra entry is for one contact who is both a customer and a supplier, and sets off that contact's own invoices and bills. `contras.ts` |
+| `FIN32` | An invoice or bill that a posted contra entry sets off is not voided. `bills.ts` and `invoices.ts`: "A contra entry sets this off. Void the contra entry first." |
+| `FIN33` | Refunds on an invoice depend on a contra entry, so it is not voided. `contras.ts` |
 | `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map; `transfers.ts` words it as it words `FIN16`. A member recording a payment in, a refund or a paid-now payment out on an archived account is answered `FIN37` (the draft is refused before the sign-off rule), where before this rule they were answered `FIN14`; posting, approving and marking paid by a member still answer `FIN14`. |
 | `FIN38` | A supplier credit note cannot be voided while its credit is used on another bill: take it off that bill first |
 | `FIN39` | Credit can only be applied to a bill from the same supplier as the credit note |

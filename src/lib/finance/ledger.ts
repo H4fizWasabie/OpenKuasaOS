@@ -183,7 +183,8 @@ export type LedgerSource =
   | 'expense'
   | 'transfer'
   | 'opening'
-  | 'journal';
+  | 'journal'
+  | 'contra';
 
 export type LedgerLine = {
   entry_key: string;

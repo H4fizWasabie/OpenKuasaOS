@@ -50,6 +50,8 @@ export const BILL_MESSAGES = {
   gone: 'That bill no longer exists.',
   locked: 'This bill is posted and can no longer be changed. Void it instead.',
   hasPayments: 'This bill has payments. Void or delete them before voiding it.',
+  // FIN32
+  hasContra: 'A contra entry sets this off. Void the contra entry first.',
   empty: 'A bill needs at least one line with an amount.',
   numberTaken: 'That bill number is already used.',
   missing: 'The supplier or a product on this bill no longer exists.',
@@ -94,6 +96,7 @@ export const billIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gon
 const REFUSALS: Record<string, string> = {
   FIN01: M.locked,
   FIN02: M.hasPayments,
+  FIN32: M.hasContra,
   FIN10: M.empty,
   FIN11: M.gone,
   FIN21: M.order,
@@ -123,6 +126,12 @@ export type BillListRow = {
   due_date: string;
   total: number;
   paid: number;
+  /**
+   * Set off by posted contra entries: no money moved, and it is not in `paid`. The reads always give it; it is
+   * optional so that rows made by hand (samples, tests) need not.
+   */
+  set_off?: number;
+  /** total − paid − set_off. */
   balance: number;
   display_status: BillDisplayStatus;
   /** The purchase order the bill is raised against, with its number; null when it has none. */
@@ -147,7 +156,7 @@ export type BillDetail = BillListRow & { supplier_ref: string | null; notes: str
  */
 export type SaveAndPostResult = FinResult<{ id: string; bill_no: string }> & { draftId?: string };
 
-const LIST_COLUMNS = 'id,bill_no,supplier_id,supplier_name,bill_date,due_date,total,paid,balance,display_status';
+const LIST_COLUMNS = 'id,bill_no,supplier_id,supplier_name,bill_date,due_date,total,paid,set_off,balance,display_status';
 
 /** Who a bill's order is: bill id → the order's id and number. */
 type BillOrderLinks = Map<string, { id: string; no: string | null }>;
@@ -230,6 +239,7 @@ function toListRow(row: Record<string, unknown>, links: BillOrderLinks, categori
     category_name: category?.name ?? null,
     total: Number(row.total),
     paid: Number(row.paid),
+    set_off: Number(row.set_off ?? 0),
     balance: Number(row.balance),
   };
 }

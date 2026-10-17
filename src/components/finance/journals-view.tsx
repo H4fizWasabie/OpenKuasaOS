@@ -66,6 +66,7 @@ const SOURCE_SCREENS: Record<LedgerSource, string> = {
   transfer: 'Banking',
   opening: 'Banking',
   journal: 'Journals',
+  contra: 'Contra Entries',
 };
 
 const ALL_SOURCES = Object.keys(SOURCE_LABELS) as LedgerSource[];

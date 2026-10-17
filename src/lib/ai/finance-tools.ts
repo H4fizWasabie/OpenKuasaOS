@@ -46,8 +46,8 @@ import {
   deleteQuotation,
   listQuotations,
   quotationIdInput,
-  saveQuotation,
-  saveQuotationInput,
+  saveQuotationInRinggit,
+  saveQuotationToolInput,
   sendQuotation,
 } from '@/lib/finance/quotations';
 import {
@@ -69,7 +69,7 @@ import {
 } from '@/lib/finance/refunds';
 import {
   createContact,
-  createContactInput,
+  createContactToolInput,
   deleteContact,
   deleteContactInput,
   listBillBalances,
@@ -78,7 +78,7 @@ import {
   setContactActive,
   setContactActiveInput,
   updateContact,
-  updateContactInput,
+  updateContactToolInput,
 } from '@/lib/finance/contacts';
 import {
   createProduct,
@@ -106,6 +106,7 @@ import {
   voidPayment,
   voidPaymentIn,
 } from '@/lib/finance/money';
+import { listContras } from '@/lib/finance/contras';
 import type { FinanceWriteContext } from '@/lib/finance/result';
 
 /** Who is asking, and whether they may change anything. */
@@ -240,6 +241,15 @@ export function createBendaharaTools(access: FinanceAccess) {
       inputSchema: z.object({}),
       execute: async () => listPaymentsOut(ctx),
     }),
+    listContraEntries: tool({
+      description:
+        'Contra entries: a contact who is both a customer and a supplier has invoices set off against bills, with no ' +
+        'money moving. Each with its number (CT-), date, contact, amount in ringgit, status (draft/posted/void) and ' +
+        'the invoices and bills it sets off with the amount on each. Read only: contra entries are recorded on the ' +
+        'Contra Entries screen by an owner or admin.',
+      inputSchema: z.object({}),
+      execute: async () => listContras(ctx),
+    }),
     listFinanceContacts: tool({
       description: 'Finance contacts: customers and suppliers, with their kind and contact details.',
       inputSchema: z.object({}),
@@ -291,8 +301,8 @@ export function createBendaharaTools(access: FinanceAccess) {
     // Quotations
     saveQuotation: tool({
       description: 'Create or edit a DRAFT sales quotation. Omit id to create.',
-      inputSchema: saveQuotationInput,
-      execute: async (input) => saveQuotation(ctx, input),
+      inputSchema: saveQuotationToolInput,
+      execute: async (input) => saveQuotationInRinggit(ctx, input),
     }),
     sendQuotation: tool({
       description: 'Mark a quotation as sent to the customer.',
@@ -416,13 +426,13 @@ export function createBendaharaTools(access: FinanceAccess) {
     // Contacts (customers / suppliers)
     createFinanceContact: tool({
       description: 'Add a finance contact (a customer or a supplier).',
-      inputSchema: createContactInput,
-      execute: async (input) => createContact(ctx, input),
+      inputSchema: createContactToolInput,
+      execute: async (input) => createContact(ctx, createContactToolInput.parse(input)),
     }),
     updateFinanceContact: tool({
       description: 'Edit a finance contact.',
-      inputSchema: updateContactInput,
-      execute: async (input) => updateContact(ctx, input),
+      inputSchema: updateContactToolInput,
+      execute: async (input) => updateContact(ctx, updateContactToolInput.parse(input)),
     }),
     setFinanceContactActive: tool({
       description: 'Activate or deactivate a finance contact.',
