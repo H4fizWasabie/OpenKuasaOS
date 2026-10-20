@@ -1,4 +1,4 @@
-import { recordPaymentInAction, voidPaymentInAction } from '@/app/(app)/finance/actions';
+import { fxSstRateForAction, recordPaymentInAction, voidPaymentInAction } from '@/app/(app)/finance/actions';
 import { type PaymentInActions, PaymentsInView } from '@/components/finance/payments-in-view';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
@@ -11,6 +11,7 @@ import { SAMPLE_PAYMENTS_IN, SAMPLE_TODAY } from './sales-sample';
 
 const ACTIONS: PaymentInActions = {
   record: recordPaymentInAction,
+  fxRate: fxSstRateForAction,
   voidPayment: voidPaymentInAction,
 };
 
@@ -27,6 +28,7 @@ export default async function PaymentsInScreen() {
   const [rows, invoices, accounts] = await Promise.all([
     listPaymentsIn(ctx),
     canEdit ? listInvoices(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
     canEdit ? listAccounts(ctx) : [],
   ]);
   return (

@@ -14,12 +14,13 @@ import {
 import { type CreditNoteRow, saveCreditNoteInput } from '@/lib/finance/credit-notes';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { WRITE_FAILED } from '@/lib/finance/result';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const SENT = '11111111-1111-4111-8111-111111111111';
 const PAID = '22222222-2222-4222-8222-222222222222';
 const DRAFT_NOTE = '33333333-3333-4333-8333-333333333333';
 
-const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ({
+const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ringgitRow({
   id: SENT,
   invoice_no: 'INV-0007',
   customer_id: 'aisyah',
@@ -216,7 +217,7 @@ describe('the note that a credit note was saved', () => {
     expect(creditNoteFormError(changed, offered)).toBeNull();
 
     const saved = creditNoteSaved(changed, offered, false);
-    expect(saved).toEqual({ invoice_no: 'INV-0009', customer_name: 'Bakar Enterprise', amount: 25, issued: false });
+    expect(saved).toEqual({ invoice_no: 'INV-0009', customer_name: 'Bakar Enterprise', amount: 25, currency: 'MYR', issued: false });
     // What the note says is what was sent.
     expect(creditNotePayload(changed)).toMatchObject({ invoice_id: PAID, amount: 25 });
     const said = creditNoteSavedNote(saved!);

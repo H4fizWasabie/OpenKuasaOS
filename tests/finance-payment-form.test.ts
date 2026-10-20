@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BillListRow } from '@/lib/finance/bills';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import { type FinanceAccount, type PaymentOutRow, recordPaymentOutInput } from '@/lib/finance/money';
 import {
   type PayableBill,
@@ -18,6 +19,7 @@ import {
   toggleAll,
   toggleBill,
 } from '@/lib/finance/payment-form';
+import { ringgitBill } from './helpers/bill-rows';
 
 const LIM = '11111111-1111-4111-8111-111111111111';
 const MAJU = '22222222-2222-4222-8222-222222222222';
@@ -28,7 +30,7 @@ const today = '2026-10-11';
 /** 1 → a valid uuid ending in 000000000001. */
 const billId = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`;
 
-const bill = (n: number, b: Partial<BillListRow> = {}): BillListRow => ({
+const bill = (n: number, b: Partial<BillListRow> = {}): BillListRow => ringgitBill({
   id: billId(n),
   bill_no: `BILL-${String(n).padStart(4, '0')}`,
   supplier_id: LIM,
@@ -65,8 +67,8 @@ const paid = (n: number, p: Partial<PaymentOutRow> = {}): PaymentOutRow => ({
 });
 
 const accounts: FinanceAccount[] = [
-  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null },
-  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' },
+  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null, currency: 'MYR' },
+  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' },
 ];
 
 const form = (payable: PayableBill[], f: Partial<PaymentForm> = {}): PaymentForm => ({
@@ -195,12 +197,16 @@ describe('newPaymentForm', () => {
     expect(newPaymentForm(payable, accounts, today)).toEqual({
       supplierId: '',
       amounts: {},
+      currency: 'MYR',
+      ringgit: '',
       accountId: BANK,
       date: today,
       method: 'bank_transfer',
       reference: '',
       notes: '',
       scheduled: false,
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
   });
   it('chooses the supplier when there is only one to pay', () => {
@@ -316,12 +322,15 @@ describe('paymentPayload', () => {
     const filled: PaymentForm = {
       supplierId: LIM,
       amounts: { [payable[0].id]: '200.50', [payable[1].id]: ' 80 ' },
+      currency: 'MYR',
+      ringgit: '',
       accountId: BANK,
       date: '2026-10-20',
       method: 'cheque',
       reference: ' CHQ 001 ',
       notes: '',
       scheduled: true,
+      fx: ringgitFields(),
     };
     const payload = paymentPayload(filled);
     expect(payload).toEqual({

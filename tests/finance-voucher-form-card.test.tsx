@@ -7,6 +7,7 @@ import type { BillListRow } from '@/lib/finance/bills';
 import type { PaymentOutRow } from '@/lib/finance/money';
 import { draftVoucherForm, newVoucherForm, voucherPayableBills } from '@/lib/finance/voucher-form';
 import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
+import { ringgitBill } from './helpers/bill-rows';
 
 /**
  * The voucher form card, read without a DOM. Its hooks are given fixed values, so the card can be called as a plain
@@ -43,16 +44,16 @@ const BILL = 'b1111111-1111-4111-8111-111111111111';
 const TODAY = '2026-10-12';
 const OVER_BILLED = 'BILL-0007 is against PO-0001, whose bills come to RM 12,400.00, over its total of RM 10,000.00.';
 
-const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank' }];
+const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank', currency: 'MYR' }];
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 const bills: BillListRow[] = [
   {
     id: BILL, bill_no: 'BILL-0007', supplier_id: MAJU, supplier_name: 'Syarikat Maju', bill_date: '2026-10-01', due_date: '2026-10-31', total: 132.5, paid: 0,
-    balance: 132.5, display_status: 'pending', purchase_order_id: 'po1', purchase_order_no: 'PO-0001', category_id: null, category_name: null,
+    balance: 132.5, display_status: 'pending' as const, purchase_order_id: 'po1', purchase_order_no: 'PO-0001', category_id: null, category_name: null,
   },
-];
+].map((b) => ringgitBill(b));
 const payable = voucherPayableBills(bills, [], null);
-const orders = [{ id: 'po1', po_no: 'PO-0001', total: 10000, billed_total: 12400, received_total: 0, over_billed: true, billed_over_received: false }];
+const orders = [{ id: 'po1', po_no: 'PO-0001', total: 10000, billed_total: 12400, received_total: 0, over_billed: true, billed_over_received: false, currency: 'MYR' }];
 const draftRow: PaymentVoucherRow = {
   transaction_id: VOUCHER, number: null, txn_date: '2026-10-05', method: 'cheque', amount: 132.5, status: 'draft', reference: null, notes: null,
   account_id: ACCOUNT, account_name: 'Maybank Current', account_kind: 'bank', contact_id: MAJU, party_name: 'Syarikat Maju', kind: 'bill',

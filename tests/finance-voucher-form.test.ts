@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
 import { orderNotesForBills, type OrderBilling } from '@/lib/finance/purchase-views';
 import {
@@ -36,8 +37,8 @@ const VOUCHER = '55555555-5555-4555-8555-555555555555';
 const TODAY = '2026-10-12';
 
 const accounts = [
-  { id: CASH, name: 'Cash in hand', kind: 'cash' as const, bank_name: null },
-  { id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank' },
+  { id: CASH, name: 'Cash in hand', kind: 'cash' as const, bank_name: null, currency: 'MYR' },
+  { id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank', currency: 'MYR' },
 ];
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 
@@ -87,6 +88,8 @@ describe('the voucher form', () => {
       id: null, kind: 'category', supplierId: '', amounts: {},
       payee: TYPED_PAYEE, payeeName: '', categoryId: CATEGORY, amount: '', accountId: ACCOUNT, date: TODAY,
       method: 'bank_transfer', reference: '', notes: '',
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
     expect(newVoucherForm([], [...categories, { id: CONTACT, name: 'Rent' }], TODAY)).toMatchObject({ categoryId: '', accountId: '' });
   });
@@ -292,7 +295,7 @@ describe('the questions', () => {
 
 describe('the over-billing note at Approve', () => {
   const order = (over: Partial<OrderBilling>): OrderBilling => ({
-    id: 'po-1', po_no: 'PO-0007', total: 10000, billed_total: 12400, received_total: 10000, over_billed: true, billed_over_received: false, ...over,
+    id: 'po-1', po_no: 'PO-0007', total: 10000, billed_total: 12400, received_total: 10000, over_billed: true, billed_over_received: false, currency: 'MYR', ...over,
   });
   const bills = [
     { id: 'b1', bill_no: 'BILL-0007', purchase_order_id: 'po-1' },

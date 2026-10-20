@@ -4,6 +4,7 @@ import { VoucherFormCard } from '@/components/finance/voucher-form-card';
 import type { BillListRow } from '@/lib/finance/bills';
 import { draftVoucherForm, newVoucherForm, voucherPayableBills } from '@/lib/finance/voucher-form';
 import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
+import { ringgitBill } from './helpers/bill-rows';
 
 /**
  * The "When" choice of the voucher form card (To be paid / Paid now), read without a DOM as the form-card test does:
@@ -35,14 +36,14 @@ const VOUCHER = '55555555-5555-4555-8555-555555555555';
 const BILL = 'b1111111-1111-4111-8111-111111111111';
 const TODAY = '2026-10-12';
 
-const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank' }];
+const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank', currency: 'MYR' }];
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 const bills: BillListRow[] = [
   {
     id: BILL, bill_no: 'BILL-0007', supplier_id: MAJU, supplier_name: 'Syarikat Maju', bill_date: '2026-10-01', due_date: '2026-10-31', total: 132.5, paid: 0,
-    balance: 132.5, display_status: 'pending', purchase_order_id: null, purchase_order_no: null, category_id: null, category_name: null,
+    balance: 132.5, display_status: 'pending' as const, purchase_order_id: null, purchase_order_no: null, category_id: null, category_name: null,
   },
-];
+].map((b) => ringgitBill(b));
 const payable = voucherPayableBills(bills, [], null);
 const draftRow: PaymentVoucherRow = {
   transaction_id: VOUCHER, number: null, txn_date: '2026-10-05', method: 'cheque', amount: 132.5, status: 'draft', reference: null, notes: null,

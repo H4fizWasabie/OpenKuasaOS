@@ -8,6 +8,7 @@ import type { BillListRow } from '@/lib/finance/bills';
 import type { FinanceAccount, PaymentOutRow } from '@/lib/finance/money';
 import { type OrderBilling, paymentsView } from '@/lib/finance/purchase-views';
 import { payableBills } from '@/lib/finance/payment-form';
+import { ringgitBill } from './helpers/bill-rows';
 
 /**
  * The Payments Out screen as the server sends it: rendered to a string and read as markup (no DOM here, so
@@ -32,7 +33,7 @@ const SUPPLIER = '44444444-4444-4444-8444-444444444444';
 const MARK = "This bill’s purchase order is billed over its total or for more than has been received";
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ({
+const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ringgitBill({
   id,
   bill_no: `BILL-${id}`,
   supplier_id: SUPPLIER,
@@ -75,10 +76,11 @@ const order = (extra: Partial<OrderBilling> = {}): OrderBilling => ({
   received_total: 1000,
   over_billed: true,
   billed_over_received: false,
+  currency: 'MYR',
   ...extra,
 });
 
-const accounts: FinanceAccount[] = [{ id: 'bank', name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' }];
+const accounts: FinanceAccount[] = [{ id: 'bank', name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' }];
 const actions: PaymentActions = {
   record: vi.fn(),
   markPaid: vi.fn(),
@@ -186,5 +188,56 @@ describe('the Record Payment form', () => {
   it('says nothing about a bill that is not ticked', () => {
     const html = card({ supplierId: 'other', billId: 'b' }, [order()]);
     expect(text(html)).not.toContain('is against PO-0003');
+  });
+});
+
+describe('a bill in another currency on Payments Out (stage 4b)', () => {
+  // Worked example B4: USD 1,080.00 at 4.2 (RM 4,536.00), USD 400.00 paid with RM 1,700.00.
+  const usd = bill('u', {
+    currency: 'USD', fx_rate: 4.2, fx_rate_text: '4.2000000000', fx_rate_source: 'manual', fx_rate_provider: 'reuters',
+    total: 1080, balance: 680, paid: 400, total_myr: 4536, balance_myr: 2856,
+  });
+  const usdPaid: PaymentOutRow = {
+    ...payment(1, 'u', 'posted'), amount: 400, transaction_amount: 1700, currency: 'USD', amount_myr: 1700, carried_myr: 1680, realised_myr: -20,
+  };
+  const myrPaid: PaymentOutRow = { ...payment(2, 'a', 'posted'), amount: 50, transaction_amount: 50 };
+
+  it('shows the part in its currency, the ringgit paid out for it, and the realised difference', () => {
+    const html = render([usdPaid, myrPaid], [usd, bill('a')], []);
+    const row = text(html.split('<tr').find((r) => r.includes('BILL-u')) ?? '');
+    expect(row).toContain('USD 400.00 · RM 1,700.00 Realised loss RM 20.00');
+    expect(text(html.split('<tr').find((r) => r.includes('BILL-a')) ?? '')).toContain('RM 50.00');
+    // Paid this month in ringgit: RM 50.00 + RM 1,700.00.
+    expect(text(html)).toContain('RM 1,750');
+  });
+
+  it('asks for the ringgit paid out, and offers no "Schedule for later", once a USD bill is ticked', () => {
+    const html = renderToStaticMarkup(
+      <PaymentFormCard
+        payable={payableBills([usd], [])}
+        accounts={accounts}
+        today={TODAY}
+        preselect={{ supplierId: SUPPLIER, billId: 'u' }}
+        orders={[]}
+        record={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    expect(text(html)).toContain('Ringgit paid out');
+    expect(text(html)).toContain('USD 680.00 to pay (≈ RM 2,856.00 still carried)');
+    expect(text(html)).not.toContain('Schedule for later');
+    const ringgit = renderToStaticMarkup(
+      <PaymentFormCard
+        payable={payableBills([bill('a')], [])}
+        accounts={accounts}
+        today={TODAY}
+        preselect={{ supplierId: SUPPLIER, billId: 'a' }}
+        orders={[]}
+        record={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    expect(text(ringgit)).toContain('Schedule for later');
+    expect(text(ringgit)).not.toContain('Ringgit paid out');
   });
 });

@@ -6,6 +6,8 @@
  * as the text the person typed and added up in whole sen.
  */
 import { typedNumber } from './format';
+import { BASE_CURRENCY } from './currencies';
+import type { CurrencyFields } from './document-currency';
 import type { FinanceAccount, PaymentMethod, PaymentOutRow } from './money';
 
 /** What the form needs to know of a document that can take a payment. */
@@ -69,9 +71,13 @@ export function amountText(amount: number): string {
   return amount.toFixed(2);
 }
 
-/** The first bank account, or the first account of any kind. */
+/**
+ * The first ringgit bank account, or the first ringgit account of any kind. An account in another currency is never
+ * the default (stage 5b: a payment form offers one for documents in its currency, chosen by the person).
+ */
 export function defaultAccount(accounts: FinanceAccount[]): string {
-  return (accounts.find((a) => a.kind === 'bank') ?? accounts[0])?.id ?? '';
+  const ringgit = accounts.filter((a) => a.currency === BASE_CURRENCY);
+  return (ringgit.find((a) => a.kind === 'bank') ?? ringgit[0])?.id ?? '';
 }
 
 /** Ticks a document for all it can still take, or unticks it. */
@@ -184,6 +190,40 @@ export type AllocationFormKind<F extends AllocationFormState, D extends Payable>
   total: (form: F) => number;
   error: (form: F, documents: D[]) => string | null;
   payload: (form: F) => unknown;
-  /** Present when the payment can be scheduled for later: only money out. */
-  schedule?: { is: (form: F) => boolean; set: (form: F, scheduled: boolean) => F };
+  /**
+   * Present when the payment can be scheduled for later: only money out. `offered` false hides the choice for this
+   * form as it stands (a bill in another currency is paid now, stage 4b); absent, it is always offered.
+   */
+  schedule?: { is: (form: F) => boolean; set: (form: F, scheduled: boolean) => F; offered?: (form: F) => boolean };
+  /**
+   * Present when documents may be in another currency (money in, stage 3b; money out, 4b): the currency the amounts are in,
+   * the documents listed (one currency at a time), and the ringgit-received box with what it comes to. Absent,
+   * every amount is ringgit and every document of the party is listed.
+   */
+  currency?: {
+    of: (form: F) => string;
+    offered: (form: F, documents: D[]) => D[];
+    ringgit: {
+      needed: (form: F) => boolean;
+      value: (form: F) => string;
+      set: (form: F, text: string) => F;
+      label: string;
+      hint: string;
+      /** Sentences under the box: the realised difference, as "about". */
+      notes: (form: F, documents: D[]) => string[];
+    };
+  };
+  /**
+   * Present when the payment may be on an account in another currency (stage 5b): the accounts offered as the form
+   * stands, choosing one, and the rate part (ringgit while the account is). On such an account the documents
+   * offered are the account's currency's, no ringgit box is asked, it is paid now, and the rate is asked instead.
+   */
+  account?: {
+    offered: (form: F, accounts: FinanceAccount[]) => FinanceAccount[];
+    choose: (form: F, account: FinanceAccount) => F;
+    fx: (form: F) => CurrencyFields;
+    setFx: (form: F, fx: CurrencyFields) => F;
+    /** Sentences under the rate box: the movement's ringgit and the realised difference, as "about". */
+    notes: (form: F, documents: D[]) => string[];
+  };
 };

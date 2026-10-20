@@ -15,8 +15,9 @@ describe('listOpenInvoices', () => {
     expect(calls[0]).toMatchObject({
       name: 'finance_invoice_totals',
       op: 'select',
-      columns: 'customer_id,customer_name,due_date,balance,display_status',
-      filters: { org_id: ctx.orgId, 'balance neq': 0, 'display_status in': ['sent', 'overdue', 'paid'] },
+      // In ringgit (stage 3a): the view's balance_myr, read under the name balance.
+      columns: 'customer_id,customer_name,due_date,balance:balance_myr,display_status',
+      filters: { org_id: ctx.orgId, 'balance_myr neq': 0, 'display_status in': ['sent', 'overdue', 'paid'] },
       range: [0, OPEN_PAGE_SIZE - 1],
     });
     expect(calls[0].order).toEqual(['due_date asc', 'id asc']);
@@ -45,7 +46,8 @@ describe('listOpenBills', () => {
     expect(calls[0]).toMatchObject({
       name: 'supplier_bill_totals',
       op: 'select',
-      columns: 'supplier_id,supplier_name,due_date,balance,display_status',
+      // In ringgit (stage 4a): the view's balance_myr, read under the name balance; the filter stays on balance.
+      columns: 'supplier_id,supplier_name,due_date,balance:balance_myr,display_status',
       filters: { org_id: ctx.orgId, 'balance gt': 0, 'display_status in': ['pending', 'overdue'] },
       range: [0, OPEN_PAGE_SIZE - 1],
     });

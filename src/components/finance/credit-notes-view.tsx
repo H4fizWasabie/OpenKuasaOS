@@ -22,12 +22,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { CREDIT_NOTE_REASON_LABELS, type CreditNoteRow, type CreditNoteStatus } from '@/lib/finance/credit-notes';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinanceAccount } from '@/lib/finance/money';
 import { type RefundSaved, noteTargetKey, refundSavedNote, refundTargets } from '@/lib/finance/refund-form';
 import type { RefundRow } from '@/lib/finance/refunds';
 import type { FinResult } from '@/lib/finance/result';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import {
   CREDIT_NOTE_STATUS_LABELS,
   type CreditNoteAction,
@@ -48,6 +49,8 @@ export type CreditNoteActions = CreditNoteFormActions & {
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Records a refund against a credit note, from its row. */
   recordRefund: RecordRefund;
+  /** Bank Negara's selling rate, for a refund from an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
 };
 
 /** What only a person who may edit is given: the actions, and what the two forms offer. */
@@ -69,7 +72,7 @@ const STATUS_STYLES: Record<CreditNoteStatus, string> = {
 };
 
 /** A draft or a void credit note has refunded nothing: a dash, as a draft's number is. */
-const formatRefunded = (amount: number | null) => (amount === null ? '—' : rm(amount));
+const formatRefunded = (amount: number | null, currency = 'MYR') => (amount === null ? '—' : money(amount, currency));
 
 /** A question asked in a credit note's own row. `edit` and `refund` are not questions: they open a form card. */
 type Question = Exclude<CreditNoteAction, 'edit' | 'refund'>;
@@ -156,7 +159,7 @@ export function CreditNotesView({
     const name = creditNoteName(note);
     const who = <span className="font-medium">{note.customer_name}</span>;
     const invoice = <span className="font-medium">{note.invoice_no ?? 'its invoice'}</span>;
-    const amount = <span className="font-medium">{rm(note.amount)}</span>;
+    const amount = <span className="font-medium">{money(note.amount, note.currency)}</span>;
     const shared = { colSpan: columns, pending: confirm.pending, error: confirm.error, onCancel: close };
     switch (asking.kind) {
       case 'issue':
@@ -237,6 +240,7 @@ export function CreditNotesView({
           today={open.today}
           preselect={noteTargetKey(note.id)}
           record={actions.recordRefund}
+          fxRate={actions.fxRate}
           onClose={close}
           // The refund is on Refunds; this row's Refunded figure moves only once it is paid out.
           // The note says what the form recorded: the person may have picked something other than this row.
@@ -395,8 +399,21 @@ export function CreditNotesView({
                       <TableCell className="whitespace-nowrap">{n.customer_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{n.invoice_no ?? '—'}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{CREDIT_NOTE_REASON_LABELS[n.reason]}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(n.amount)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{formatRefunded(refundedOnNote(n))}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {(n.currency ?? 'MYR') === 'MYR' ? (
+                          rm(n.amount)
+                        ) : (
+                          // A credit note on an invoice in another currency: its amount, and what it took off in ringgit
+                          // once issued (it makes no exchange difference).
+                          <>
+                            {money(n.amount, n.currency)}
+                            {n.amount_myr !== null && n.amount_myr !== undefined ? (
+                              <span className="block text-xs text-muted-foreground">≈ {rm(n.amount_myr)}</span>
+                            ) : null}
+                          </>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">{formatRefunded(refundedOnNote(n), n.currency)}</TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={n.status === 'issued'} />

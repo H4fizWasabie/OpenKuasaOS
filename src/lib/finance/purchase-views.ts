@@ -4,12 +4,14 @@
  * and the tests both use it. `today` is always a YYYY-MM-DD date.
  */
 import type { Slice } from '@/components/charts';
-import type { BillDisplayStatus, BillListRow } from './bills';
+import { type BillDisplayStatus, type BillListRow, billRinggit } from './bills';
+import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
-import { rm, rmShort } from './format';
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow } from './money';
+import { money, rmShort } from './format';
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow, paymentOutRinggit } from './money';
 import type { PurchaseOrderDelivery, PurchaseOrderListRow, PurchaseOrderStatus } from './purchase-orders';
 import type { RfqDisplayStatus, RfqListRow } from './rfqs';
+import { rateSourceWords } from './sales-views';
 import {
   ELECTRONIC,
   METHOD_COLORS,
@@ -66,7 +68,9 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentOutRow['status'], string> = {
 
 /* ---- Supplier Bills ----------------------------------------------- */
 
-export function billsView(bills: BillListRow[], paid: PaymentOutRow[], today: string): BillsViewData {
+export function billsView(rows: BillListRow[], paid: PaymentOutRow[], today: string): BillsViewData {
+  // Every figure below adds bills up, so each bill's balance is its balance in ringgit (stage 4a).
+  const bills = rows.map((b) => ({ ...b, balance: billRinggit(b).balance }));
   const open = bills.filter((b) => b.display_status === 'pending' || b.display_status === 'overdue');
   const overdue = open.filter((b) => b.display_status === 'overdue');
   const weekEnd = addDays(today, 7);
@@ -92,7 +96,8 @@ export function billsView(bills: BillListRow[], paid: PaymentOutRow[], today: st
       { label: 'Total payable', value: rmShort(sum(open, (b) => b.balance)), delta: count(open.length, 'open bill'), deltaTone: 'flat' },
       { label: 'Due this week', value: rmShort(sum(dueThisWeek, (b) => b.balance)), delta: count(dueThisWeek.length, 'bill'), deltaTone: 'flat' },
       { label: 'Overdue', value: rmShort(sum(overdue, (b) => b.balance)), delta: count(overdue.length, 'bill'), deltaTone: overdue.length ? 'down' : 'flat' },
-      { label: 'Paid (MTD)', value: rmShort(sum(paidMtd, (p) => p.amount)), delta: count(paymentCount(paidMtd), 'payment'), deltaTone: 'flat' },
+      // In ringgit: a payment of a bill in another currency counts the ringgit that left (stage 4b).
+      { label: 'Paid (MTD)', value: rmShort(sum(paidMtd, paymentOutRinggit)), delta: count(paymentCount(paidMtd), 'payment'), deltaTone: 'flat' },
     ],
     bySupplier,
     byStatus: [
@@ -117,20 +122,39 @@ export function filterBills(bills: BillListRow[], query: string, filter: BillFil
   );
 }
 
-/** The bills table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
+/** True once any bill is in another currency: the list and the CSV then show the currency. */
+export function billsHaveForeign(rows: Pick<BillListRow, 'currency'>[]): boolean {
+  return rows.some((b) => b.currency !== BASE_CURRENCY);
+}
+
+/**
+ * The bills table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. Total and balance are in
+ * each bill's own currency; once a bill is foreign, the currency, rate and ringgit columns follow.
+ */
 export function billsCsv(bills: BillListRow[]): string {
+  const base = ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status', 'Purchase order', 'Category'];
+  const row = (b: BillListRow) => [
+    b.bill_no,
+    b.bill_date,
+    b.supplier_name,
+    b.due_date,
+    b.total,
+    b.balance,
+    BILL_STATUS_LABELS[b.display_status],
+    b.purchase_order_no,
+    b.category_name,
+  ];
+  if (!billsHaveForeign(bills)) return toCsv(base, bills.map(row));
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status', 'Purchase order', 'Category'],
+    [...base, 'Currency', 'Rate (RM per unit)', 'Total (RM)', 'Balance (RM)', 'Rate source'],
     bills.map((b) => [
-      b.bill_no,
-      b.bill_date,
-      b.supplier_name,
-      b.due_date,
-      b.total,
-      b.balance,
-      BILL_STATUS_LABELS[b.display_status],
-      b.purchase_order_no,
-      b.category_name,
+      ...row(b),
+      b.currency,
+      // The exact text, so a spreadsheet gets every digit the bill was posted at.
+      b.fx_rate_text ?? b.fx_rate,
+      b.total_myr,
+      b.balance_myr,
+      rateSourceWords(b),
     ]),
   );
 }
@@ -138,15 +162,17 @@ export function billsCsv(bills: BillListRow[]): string {
 /* ---- Payments Out ------------------------------------------------- */
 
 export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsViewData {
+  // Every figure below adds payments up, so each row counts its ringgit: for a bill in another currency, its share
+  // of the ringgit that left the account (stage 4b); a scheduled payment is always ringgit (FIN47).
   const month = today.slice(0, 7);
   const paid = rows.filter((p) => p.status === 'posted');
   const paidMtd = paid.filter((p) => p.txn_date.slice(0, 7) === month);
-  const paidMtdTotal = sum(paidMtd, (p) => p.amount);
-  const electronicMtd = sum(paidMtd.filter((p) => ELECTRONIC.has(p.method)), (p) => p.amount);
+  const paidMtdTotal = sum(paidMtd, paymentOutRinggit);
+  const electronicMtd = sum(paidMtd.filter((p) => ELECTRONIC.has(p.method)), paymentOutRinggit);
   const scheduled = rows.filter((p) => p.status === 'scheduled');
 
   // Last 8 months, oldest first, in RM thousands.
-  const paidK = (list: PaymentOutRow[]) => thousands(sum(list, (p) => p.amount));
+  const paidK = (list: PaymentOutRow[]) => thousands(sum(list, paymentOutRinggit));
   let hasTrend = false;
   const trend = lastMonths(today).map(({ key, label }) => {
     const inMonth = paid.filter((p) => monthOf(p.txn_date) === key);
@@ -161,7 +187,7 @@ export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsView
   const methods: Slice[] = PAYMENT_METHODS.map((method) => ({
     key: method,
     label: PAYMENT_METHOD_LABELS[method],
-    value: sum(paidMtd.filter((p) => p.method === method), (p) => p.amount),
+    value: sum(paidMtd.filter((p) => p.method === method), paymentOutRinggit),
     color: METHOD_COLORS[method],
   }));
   const used = methods.filter((slice) => slice.value > 0);
@@ -176,7 +202,7 @@ export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsView
         delta: 'of paid MTD',
         deltaTone: 'flat',
       },
-      { label: 'To be paid', value: rmShort(sum(scheduled, (p) => p.amount)), delta: count(paymentCount(scheduled), 'payment'), deltaTone: 'flat' },
+      { label: 'To be paid', value: rmShort(sum(scheduled, paymentOutRinggit)), delta: count(paymentCount(scheduled), 'payment'), deltaTone: 'flat' },
     ],
     trend,
     hasTrend,
@@ -229,7 +255,7 @@ export function alsoCovers(rows: PaymentOutRow[], row: PaymentOutRow): string {
 /** What a payment's bills are checked against: the billing figures and flags of a purchase order. */
 export type OrderBilling = Pick<
   PurchaseOrderListRow,
-  'id' | 'po_no' | 'total' | 'billed_total' | 'received_total' | 'over_billed' | 'billed_over_received'
+  'id' | 'po_no' | 'total' | 'billed_total' | 'received_total' | 'over_billed' | 'billed_over_received' | 'currency'
 >;
 
 /**
@@ -254,10 +280,12 @@ export function orderNotesForBills(
     const [first, ...others] = names;
     const subject = others.length === 0 ? `${first} is` : `${first} and ${others.length} more are`;
     const po = order.po_no ?? 'its purchase order';
+    // The order's figures are in its currency, as every bill on it is (FIN49).
+    const m = (n: number) => money(n, order.currency);
     notes.push(
       order.over_billed
-        ? `${subject} against ${po}, whose bills come to ${rm(order.billed_total)}, over its total of ${rm(order.total)}.`
-        : `${subject} against ${po}, which is billed ${rm(order.billed_total)} with ${rm(order.received_total)} received so far.`,
+        ? `${subject} against ${po}, whose bills come to ${m(order.billed_total)}, over its total of ${m(order.total)}.`
+        : `${subject} against ${po}, which is billed ${m(order.billed_total)} with ${m(order.received_total)} received so far.`,
     );
   }
   return notes;
@@ -280,20 +308,36 @@ export function paymentRowsAgainstFlaggedOrders(
   return new Set(rows.filter((r) => NOT_YET_PAID.has(r.status) && flaggedBills.has(r.bill_id)).map((r) => r.allocation_id));
 }
 
-/** The payments table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
+/**
+ * The payments table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. Amount is in each bill's
+ * own currency; once a payment is of a bill in another currency (stage 4b), the currency, the ringgit paid out for
+ * it, what the bill carried and the realised difference follow.
+ */
 export function paymentsCsv(rows: PaymentOutRow[]): string {
+  const base = ['Date', 'No.', 'Supplier', 'Bill', 'Account', 'Method', 'Amount', 'Status'];
+  const row = (p: PaymentOutRow) => [
+    p.txn_date,
+    p.number,
+    p.supplier_name,
+    p.bill_no,
+    p.account_name,
+    PAYMENT_METHOD_LABELS[p.method],
+    p.amount,
+    PAYMENT_STATUS_LABELS[p.status],
+  ];
+  if (!rows.some((p) => (p.currency ?? BASE_CURRENCY) !== BASE_CURRENCY)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['Date', 'No.', 'Supplier', 'Bill', 'Account', 'Method', 'Amount', 'Status'],
-    rows.map((p) => [
-      p.txn_date,
-      p.number,
-      p.supplier_name,
-      p.bill_no,
-      p.account_name,
-      PAYMENT_METHOD_LABELS[p.method],
-      p.amount,
-      PAYMENT_STATUS_LABELS[p.status],
-    ]),
+    [...base, 'Currency', 'Amount (RM)', 'Carried (RM)', 'Realised (RM)'],
+    rows.map((p) => {
+      const ringgit = (p.currency ?? BASE_CURRENCY) === BASE_CURRENCY;
+      return [
+        ...row(p),
+        p.currency ?? BASE_CURRENCY,
+        ringgit ? (p.amount_myr ?? p.amount) : (p.amount_myr ?? null),
+        ringgit ? (p.carried_myr ?? p.amount) : (p.carried_myr ?? null),
+        ringgit ? (p.realised_myr ?? 0) : (p.realised_myr ?? null),
+      ];
+    }),
   );
 }
 
@@ -373,22 +417,37 @@ export function rfqsView(rows: RfqListRow[], today: string): RfqsViewData {
   return { counts, awaitingReply: counts.sent + counts.overdue, overdue: counts.overdue };
 }
 
-/** The RFQs table as a CSV file. The total is a number, and empty until the supplier's answer is recorded. */
+/** True once any RFQ or order is in another currency: its list and its CSV then show the currency. */
+export function purchasesHaveForeign(rows: { currency: string }[]): boolean {
+  return rows.some((r) => r.currency !== BASE_CURRENCY);
+}
+
+/** The columns a foreign RFQ or order adds to its CSV. */
+const CURRENCY_CSV_COLUMNS = ['Currency', 'Rate (RM per unit)', 'Total (RM)'];
+
+/**
+ * The RFQs table as a CSV file. The total is a number, in the RFQ's own currency, and empty until the
+ * supplier's answer is recorded; once an RFQ is foreign, the currency, the exact rate and the ringgit total follow.
+ */
 export function rfqsCsv(rows: RfqListRow[], today: string): string {
+  const base = ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status', 'Purchase order'];
+  const row = (r: RfqListRow) => [
+    r.rfq_no,
+    r.rfq_date,
+    r.supplier_name,
+    r.reply_by,
+    r.supplier_ref,
+    r.line_count,
+    // Empty until the supplier's answer is recorded, like the dash on the screen: prices the buyer typed are not a quote.
+    r.quoted_at ? r.total : null,
+    RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
+    r.purchase_order_no,
+  ];
+  if (!purchasesHaveForeign(rows)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status', 'Purchase order'],
-    rows.map((r) => [
-      r.rfq_no,
-      r.rfq_date,
-      r.supplier_name,
-      r.reply_by,
-      r.supplier_ref,
-      r.line_count,
-      // Empty until the supplier's answer is recorded, like the dash on the screen: prices the buyer typed are not a quote.
-      r.quoted_at ? r.total : null,
-      RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
-      r.purchase_order_no,
-    ]),
+    [...base, ...CURRENCY_CSV_COLUMNS],
+    // The exact text, so a spreadsheet gets every digit of the rate.
+    rows.map((r) => [...row(r), r.currency, r.fx_rate_text ?? r.fx_rate, r.quoted_at ? r.total_myr : null]),
   );
 }
 
@@ -495,23 +554,28 @@ export function purchaseOrdersView(rows: PurchaseOrderListRow[]): PurchaseOrders
 }
 
 /**
- * The purchase orders table as a CSV file. Amounts are numbers. The delivery column is empty for an order
- * that was never approved: "Not delivered" would read as a late delivery.
+ * The purchase orders table as a CSV file. Amounts are numbers, in each order's own currency. The delivery column
+ * is empty for an order that was never approved: "Not delivered" would read as a late delivery. Once an order is
+ * foreign, the currency, the exact rate and the ringgit total follow.
  */
 export function purchaseOrdersCsv(rows: PurchaseOrderListRow[]): string {
+  const base = ['No.', 'Date', 'Supplier', 'RFQ', 'Expected delivery', 'Total', 'Received', 'Billed', 'Delivery', 'Status'];
+  const row = (r: PurchaseOrderListRow) => [
+    r.po_no,
+    r.po_date,
+    r.supplier_name,
+    r.rfq_no,
+    r.expected_date,
+    r.total,
+    r.received_total,
+    r.billed_total,
+    r.status === 'approved' || r.status === 'closed' ? PO_DELIVERY_LABELS[r.delivery] : null,
+    PO_STATUS_LABELS[r.status],
+  ];
+  if (!purchasesHaveForeign(rows)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'RFQ', 'Expected delivery', 'Total', 'Received', 'Billed', 'Delivery', 'Status'],
-    rows.map((r) => [
-      r.po_no,
-      r.po_date,
-      r.supplier_name,
-      r.rfq_no,
-      r.expected_date,
-      r.total,
-      r.received_total,
-      r.billed_total,
-      r.status === 'approved' || r.status === 'closed' ? PO_DELIVERY_LABELS[r.delivery] : null,
-      PO_STATUS_LABELS[r.status],
-    ]),
+    [...base, ...CURRENCY_CSV_COLUMNS],
+    // The exact text, so a spreadsheet gets every digit of the rate.
+    rows.map((r) => [...row(r), r.currency, r.fx_rate_text ?? r.fx_rate, r.total_myr]),
   );
 }

@@ -1,5 +1,6 @@
 import {
   deleteScheduledPaymentAction,
+  fxSstRateForAction,
   markPaymentPaidAction,
   recordPaymentOutAction,
   voidPaymentAction,
@@ -73,6 +74,7 @@ const ACTIONS: PaymentActions = {
   markPaid: markPaymentPaidAction,
   voidPayment: voidPaymentAction,
   remove: deleteScheduledPaymentAction,
+  fxRate: fxSstRateForAction,
 };
 
 export default async function PaymentsOutScreen() {
@@ -87,6 +89,7 @@ export default async function PaymentsOutScreen() {
   const [rows, bills, accounts, orders] = await Promise.all([
     listPaymentsOut(ctx),
     canEdit ? listBills(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
     canEdit ? listAccounts(ctx) : [],
     canEdit ? listPurchaseOrders(ctx) : [],
   ]);

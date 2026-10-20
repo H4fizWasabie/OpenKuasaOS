@@ -21,11 +21,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow } from '@/lib/finance/money';
 import { receivableInvoices } from '@/lib/finance/receipt-form';
 import type { FinResult } from '@/lib/finance/result';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import {
   PAYMENT_IN_STATUS_LABELS,
   type PaymentInMethodFilter,
@@ -42,6 +43,8 @@ import { cn } from '@/lib/utils';
 export type PaymentInActions = {
   record: RecordPayment;
   voidPayment: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** Bank Negara's selling rate, for a payment on an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
 };
 
 /** What only a person who may edit is given: the actions, and what the payment form offers. */
@@ -136,7 +139,7 @@ export function PaymentsInView({
         onCancel={close}
       >
         Void payment <span className="font-medium">{row.number}</span> of{' '}
-        <span className="font-medium">{rm(row.transaction_amount)}</span> from{' '}
+        <span className="font-medium">{money(row.transaction_amount, row.transaction_currency ?? 'MYR')}</span> from{' '}
         <span className="font-medium">{row.customer_name}</span>? The invoices it paid will owe that amount again. This
         cannot be undone. {alsoCoversInvoices(rows, row)}
       </ConfirmRow>
@@ -170,6 +173,7 @@ export function PaymentsInView({
             accounts={writer.accounts}
             today={open.today}
             record={writer.actions.record}
+            fxRate={writer.actions.fxRate}
             onClose={close}
           />
         ) : null}
@@ -307,7 +311,23 @@ export function PaymentsInView({
                           {PAYMENT_METHOD_LABELS[p.method]}
                         </Badge>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(p.amount)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {(p.currency ?? 'MYR') === 'MYR' ? (
+                          rm(p.amount)
+                        ) : (
+                          // An invoice in another currency: the part it settled, the ringgit it brought, and the
+                          // realised difference when there is one.
+                          <>
+                            {money(p.amount, p.currency)}
+                            {p.amount_myr !== null && p.amount_myr !== undefined ? ` · ${rm(p.amount_myr)}` : ''}
+                            {p.realised_myr ? (
+                              <span className="block text-xs text-muted-foreground">
+                                Realised {p.realised_myr > 0 ? 'gain' : 'loss'} {rm(Math.abs(p.realised_myr))}
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={p.status === 'posted'} />

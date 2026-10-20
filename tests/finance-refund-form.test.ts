@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import type { CreditNoteRow } from '@/lib/finance/credit-notes';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinanceAccount } from '@/lib/finance/money';
@@ -17,6 +18,7 @@ import {
   refundTargets,
 } from '@/lib/finance/refund-form';
 import { type RefundRow, recordRefundInput } from '@/lib/finance/refunds';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const INVOICE = '11111111-1111-4111-8111-111111111111';
 const NOTE = '22222222-2222-4222-8222-222222222222';
@@ -25,7 +27,7 @@ const BANK = '44444444-4444-4444-8444-444444444444';
 const CASH = '55555555-5555-4555-8555-555555555555';
 
 /** RM 100 invoiced and paid, then RM 30 credited: the customer is RM 30 in credit. */
-const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ({
+const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ringgitRow({
   id: INVOICE,
   invoice_no: 'INV-0007',
   customer_id: 'aisyah',
@@ -83,8 +85,8 @@ const refund = (r: Partial<RefundRow> = {}): RefundRow => ({
 });
 
 const accounts: FinanceAccount[] = [
-  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null },
-  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' },
+  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null, currency: 'MYR' },
+  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' },
 ];
 
 const refundable = (invoices: InvoiceListRow[], notes: CreditNoteRow[], refunds: RefundRow[]) =>
@@ -96,10 +98,12 @@ describe('refundTargets: what can be refunded, and how much', () => {
       {
         key: invoiceTargetKey(INVOICE), kind: 'invoice', id: INVOICE, number: 'INV-0007',
         invoice_id: INVOICE, invoice_no: 'INV-0007', customer_name: 'Aisyah Trading', refundable: 30,
+        currency: 'MYR', fx_rate_text: '1.0000000000', credit: 30, credit_myr: 30,
       },
       {
         key: noteTargetKey(NOTE), kind: 'credit_note', id: NOTE, number: 'CN-0003',
         invoice_id: INVOICE, invoice_no: 'INV-0007', customer_name: 'Aisyah Trading', refundable: 30,
+        currency: 'MYR', fx_rate_text: '1.0000000000', credit: 30, credit_myr: 30,
       },
     ]);
   });
@@ -236,6 +240,7 @@ describe('a new refund form', () => {
     expect(newRefundForm(two, accounts, '2026-10-09')).toEqual({
       target: '',
       amount: '',
+      ringgit: '',
       reason: '',
       accountId: BANK,
       date: '2026-10-09',
@@ -243,6 +248,8 @@ describe('a new refund form', () => {
       reference: '',
       notes: '',
       scheduled: false,
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
     expect(newRefundForm(two, [], '2026-10-09').accountId).toBe('');
   });
@@ -386,7 +393,7 @@ describe('the note that a refund was recorded', () => {
     expect(refundFormError(changed, offered)).toBeNull();
 
     const saved = refundSaved(changed, offered);
-    expect(saved).toEqual({ target: other, amount: 45, scheduled: false });
+    expect(saved).toEqual({ target: other, amount: 45, ringgit: null, scheduled: false });
     // What the note says is what was sent.
     expect(refundPayload(changed, offered)).toMatchObject({ invoice_id: OTHER, credit_note_id: null, amount: 45 });
     const said = refundSavedNote(saved!);

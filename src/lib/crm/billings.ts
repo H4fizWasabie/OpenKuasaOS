@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { klDay } from '@/lib/crm/deal-stats';
 import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
-import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow } from '@/lib/finance/invoices';
+import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow, invoicePaidRinggit, invoiceRinggit } from '@/lib/finance/invoices';
+import { listPaymentsIn, type PaymentInRow, receivedRinggitByInvoice } from '@/lib/finance/money';
 
 /** How many invoices the "Recent invoices" table shows. */
 export const RECENT_LISTED = 8;
@@ -65,9 +66,14 @@ function monthName(month: string, options: Intl.DateTimeFormatOptions) {
   );
 }
 
-/** What is still owed on an invoice; a customer in credit owes nothing. */
+/** What is still owed on an invoice, in ringgit; a customer in credit owes nothing. */
 function owed(invoice: InvoiceListRow) {
-  return Math.max(invoice.balance, 0);
+  return Math.max(invoiceRinggit(invoice).balance, 0);
+}
+
+/** What an invoice was billed for, in ringgit (an invoice in another currency at its own rate). */
+function billedOn(invoice: InvoiceListRow) {
+  return invoiceRinggit(invoice).total;
 }
 
 /** The figures on Kasturi's Billings page, from the workspace's invoices. */
@@ -76,6 +82,13 @@ export function buildBillings(
   now: Date,
   /** The title of the deal each linked invoice belongs to, by invoice id. */
   dealTitles: ReadonlyMap<string, string> = new Map(),
+  /**
+   * The workspace's payments in. "Received" is the ringgit that actually arrived, as Bendahara shows it; for an
+   * invoice in another currency that can differ from what the payments carried off it (the exchange gain or
+   * loss), so Billed, Received and Outstanding need not add up. Left out, received falls back to what the
+   * invoices' paid figures carried.
+   */
+  payments?: PaymentInRow[],
 ): BillingsModel {
   const month = klDay(now).slice(0, 7);
   const issued = invoices.filter((invoice) => ISSUED.has(invoice.display_status));
@@ -83,8 +96,10 @@ export function buildBillings(
   const overdue = open.filter((invoice) => invoice.display_status === 'overdue');
   const thisMonth = issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === month);
 
-  const billed = sum(issued.map((invoice) => invoice.total));
-  const received = sum(issued.map((invoice) => invoice.paid));
+  const billed = sum(issued.map(billedOn));
+  // In ringgit, what arrived (Outstanding comes from each invoice's balance, never from Billed less Received).
+  const arrived = payments ? receivedRinggitByInvoice(payments) : null;
+  const received = sum(issued.map((invoice) => (arrived ? (arrived.get(invoice.id) ?? 0) : invoicePaidRinggit(invoice))));
 
   const months = Array.from({ length: TREND_MONTHS }, (_, i) => shiftMonth(month, i - (TREND_MONTHS - 1)));
 
@@ -102,7 +117,7 @@ export function buildBillings(
   return {
     monthTitle: monthName(month, { month: 'long', year: 'numeric' }),
     stats: {
-      billedThisMonth: sum(thisMonth.map((invoice) => invoice.total)),
+      billedThisMonth: sum(thisMonth.map(billedOn)),
       billedThisMonthCount: thisMonth.length,
       outstanding: sum(open.map(owed)),
       outstandingCount: open.length,
@@ -114,7 +129,7 @@ export function buildBillings(
     trend: months.map((m) => ({
       month: m,
       label: monthName(m, { month: 'short' }),
-      billed: sum(issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === m).map((invoice) => invoice.total)),
+      billed: sum(issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === m).map(billedOn)),
     })),
     byStatus: BILLING_STATUSES.map((status) => ({
       status,
@@ -124,7 +139,7 @@ export function buildBillings(
       .map(({ id, name, rows }) => ({
         id,
         name,
-        billed: sum(rows.map((invoice) => invoice.total)),
+        billed: sum(rows.map(billedOn)),
         outstanding: sum(rows.filter((invoice) => invoice.display_status !== 'paid').map(owed)),
       }))
       .sort((a, b) => b.billed - a.billed || a.name.localeCompare(b.name))
@@ -145,15 +160,16 @@ export function buildBillings(
 
 /** Reads a workspace's invoices and builds the Billings page from them. */
 export async function loadCrmBillings(client: SupabaseClient, orgId: string, now: Date): Promise<BillingsModel> {
-  const [invoices, dealTitles] = await Promise.all([
+  const [invoices, payments, dealTitles] = await Promise.all([
     listInvoices({ client, orgId }),
+    listPaymentsIn({ client, orgId }),
     // The deal column is an extra; the figures still show if it cannot load.
     linkedDealTitles(client, orgId).catch((error) => {
       console.error('[crm/billings] could not load linked deals', error);
       return new Map<string, string>();
     }),
   ]);
-  return buildBillings(invoices, now, dealTitles);
+  return buildBillings(invoices, now, dealTitles, payments);
 }
 
 /** The title of the deal each linked invoice belongs to, by invoice id. */

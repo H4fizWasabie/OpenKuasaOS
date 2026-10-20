@@ -3,6 +3,7 @@
 import { type FormEvent, useId, useState } from 'react';
 import { Banknote } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { type FxRateLookup, MovementRateFields, accountLabel } from '@/components/finance/movement-rate-fields';
 import { OrderNotes } from '@/components/finance/order-notes';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { AllocationFormKind, AllocationFormState, Payable } from '@/lib/finance/allocation-form';
-import { rm } from '@/lib/finance/format';
+import { withRateAnswer, withRateTyped } from '@/lib/finance/document-currency';
+import { money } from '@/lib/finance/format';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from '@/lib/finance/money';
 import type { FinResult } from '@/lib/finance/result';
 import { displayDate } from '@/lib/finance/view-helpers';
@@ -32,6 +34,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   preselect,
   notes,
   record,
+  fxRate,
   onClose,
 }: {
   kind: AllocationFormKind<F, D>;
@@ -45,6 +48,8 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   /** Advice on the documents ticked, as sentences shown under them; never a refusal. Absent for no advice. */
   notes?: (form: F) => string[];
   record: RecordPayment;
+  /** Bank Negara's selling rate for a date, for a payment on an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
   onClose: () => void;
 }) {
   const id = useId();
@@ -60,9 +65,20 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   const parties = kind.parties(documents);
   // A ticked document that was paid off since a refresh is dropped from everything below.
   const form = kind.keep(typed, documents);
-  const offered = kind.documentsOf(documents, kind.partyId(form));
+  // One currency at a time when documents may be in another (money in): the ticked ones' currency.
+  const offered = kind.currency ? kind.currency.offered(form, documents) : kind.documentsOf(documents, kind.partyId(form));
+  const code = kind.currency?.of(form) ?? 'MYR';
+  const ringgit = kind.currency?.ringgit;
+  const askRinggit = ringgit?.needed(form) ?? false;
   const tickedCount = Object.keys(form.amounts).length;
-  const scheduled = kind.schedule?.is(form) ?? false;
+  // A payment that cannot wait (a bill in another currency) is offered no "Schedule for later".
+  const schedule = kind.schedule && (kind.schedule.offered?.(form) ?? true) ? kind.schedule : undefined;
+  const scheduled = schedule?.is(form) ?? false;
+  // Stage 5b: the accounts offered as the form stands, and the rate when the one chosen is in another currency.
+  const account = kind.account;
+  const offeredAccounts = account ? account.offered(form, accounts) : accounts;
+  const fx = account?.fx(form);
+  const rateAsked = account !== undefined && fx !== undefined && fx.currency !== 'MYR';
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     // Handled here rather than as a form action, so a refused form keeps what was typed.
@@ -143,7 +159,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
                     {ticked ? (
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground" aria-hidden>
-                          RM
+                          {code === 'MYR' ? 'RM' : code}
                         </span>
                         <Input
                           type="number"
@@ -170,7 +186,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
           {notes ? <OrderNotes notes={notes(form)} /> : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm" aria-live="polite">
-              Total <span className="font-semibold tabular-nums">{rm(kind.total(form))}</span>
+              Total <span className="font-semibold tabular-nums">{money(kind.total(form), code)}</span>
               {tickedCount ? (
                 <span className="text-muted-foreground">
                   {' '}
@@ -191,17 +207,56 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
           </div>
         </fieldset>
 
+        {ringgit && askRinggit ? (
+          <div className="space-y-1.5 md:col-span-12">
+            <Label htmlFor={`${id}-ringgit`}>{ringgit.label}</Label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground" aria-hidden>
+                RM
+              </span>
+              <Input
+                id={`${id}-ringgit`}
+                inputMode="decimal"
+                autoComplete="off"
+                className="w-40 text-right tabular-nums"
+                aria-describedby={`${id}-ringgit-hint`}
+                // Enter in the box does not record the payment half typed.
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.preventDefault();
+                }}
+                value={ringgit.value(form)}
+                onChange={(e) => edit((f) => ringgit.set(f, e.target.value))}
+              />
+            </div>
+            <p id={`${id}-ringgit-hint`} className="text-xs text-muted-foreground">
+              {ringgit.hint}
+            </p>
+            {ringgit.notes(form, documents).map((note) => (
+              <p key={note} className="text-sm text-muted-foreground" aria-live="polite">
+                {note}
+              </p>
+            ))}
+          </div>
+        ) : null}
+
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-account`}>{words.account}</Label>
-          <Select value={form.accountId} onValueChange={(v) => edit((f) => ({ ...f, accountId: v }))}>
+          <Select
+            value={form.accountId}
+            onValueChange={(v) =>
+              edit((f) => {
+                const chosen = accounts.find((a) => a.id === v);
+                return chosen && account ? account.choose(f, chosen) : { ...f, accountId: v };
+              })
+            }
+          >
             <SelectTrigger id={`${id}-account`} className="w-full">
               <SelectValue placeholder="Choose an account" />
             </SelectTrigger>
             <SelectContent>
-              {accounts.map((a) => (
+              {offeredAccounts.map((a) => (
                 <SelectItem key={a.id} value={a.id}>
-                  {a.name}
-                  {a.bank_name ? ` · ${a.bank_name}` : ''}
+                  {accountLabel(a)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -243,7 +298,21 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
             onChange={(e) => edit((f) => ({ ...f, reference: e.target.value }))}
           />
         </div>
-        <div className={kind.schedule ? 'space-y-1.5 md:col-span-7' : 'space-y-1.5 md:col-span-12'}>
+        {rateAsked && account && fx ? (
+          <MovementRateFields
+            id={id}
+            className="space-y-1.5 md:col-span-12"
+            fx={fx}
+            date={form.date}
+            fxRate={fxRate}
+            onAnswer={(key, answer) =>
+              setForm((f) => account.setFx(f, withRateAnswer(account.fx(f), f.date, key, answer, true)))
+            }
+            onTyped={(text) => edit((f) => account.setFx(f, withRateTyped(account.fx(f), text)))}
+            notes={account.notes(form, documents)}
+          />
+        ) : null}
+        <div className={schedule ? 'space-y-1.5 md:col-span-7' : 'space-y-1.5 md:col-span-12'}>
           <Label htmlFor={`${id}-notes`}>Notes</Label>
           <Input
             id={`${id}-notes`}
@@ -253,7 +322,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
             onChange={(e) => edit((f) => ({ ...f, notes: e.target.value }))}
           />
         </div>
-        {kind.schedule ? (
+        {schedule ? (
           <fieldset className="space-y-1.5 md:col-span-5">
             <legend className="text-sm font-medium leading-none">When</legend>
             <div className="flex h-8 flex-wrap items-center gap-4">
@@ -263,7 +332,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
                   name={`${id}-when`}
                   className="size-4 accent-primary"
                   checked={!scheduled}
-                  onChange={() => edit((f) => kind.schedule?.set(f, false) ?? f)}
+                  onChange={() => edit((f) => schedule.set(f, false))}
                 />
                 Pay now
               </label>
@@ -273,7 +342,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
                   name={`${id}-when`}
                   className="size-4 accent-primary"
                   checked={scheduled}
-                  onChange={() => edit((f) => kind.schedule?.set(f, true) ?? f)}
+                  onChange={() => edit((f) => schedule.set(f, true))}
                 />
                 Schedule for later
               </label>

@@ -3047,3 +3047,144 @@ with no date).
   deployed. The RFQs list reads `source_rfq_id` from `finance_rfq_totals`,
   and without the column the screen does not load. The other order is safe:
   the code before it sends no link and reads the view's columns by name.
+- Invoices in another currency (`20261120100000`): a rate marked as Bank
+  Negara Malaysia's is accepted for any BNM 17:00 selling rate dated on or
+  before the date of supply (or the invoice date), not only the newest one
+  (`FIN39` checks that the figure is BNM's for its own date, and that the
+  date is not after the date of supply). The form offers the newest and asks
+  again whenever the date changes, and says when the rate it holds is more
+  than seven days old; a direct call can still post at an older BNM rate.
+- Payments in on invoices in another currency (`20261120110000`, stage 3b):
+  Cash Receipts offers ringgit invoices only, but a draft cash receipt naming
+  an invoice in another currency can still be saved by a direct call (before
+  3b that save was refused with `FIN41`). It holds its part of the invoice
+  until it is deleted, and posting it is refused with `FIN45`: such an invoice
+  is paid with Record payment on Invoices, which takes the ringgit received.
+- Credit notes and refunds on invoices in another currency (`20261120120000`,
+  stage 3c): `FIN41` is no longer raised. A credit note is in its invoice's
+  currency at its invoice's rate (the database writes `currency`, `fx_rate`
+  and, when it is issued, `amount_myr`, whatever the caller sent), so it
+  makes no exchange difference. A credit note is the one movement that can
+  take an invoice past zero; on a paid invoice it takes its amount at the
+  rate, and on one that owes less than the amount it takes exactly what is
+  open plus the rest at the rate (`private.finance_fx_carried`). Its
+  `amount_myr` may be 0.00 (a few units of a currency worth very little). A
+  refund on such an invoice, or on a credit note of one, is paid from a
+  ringgit account with the ringgit paid out (`FIN46` without it) and is paid
+  out now: asked as scheduled it is refused with `FIN47`. The finance
+  assistant records credit notes and refunds on ringgit invoices only.
+  A payment in on such an invoice is not voided while a credit note issued
+  (or dated) after it stands on that invoice (`FIN48`): void the credit note
+  first, then the payment, and issue the credit note again, which then takes
+  the closing figure, so Receivable ends at 0.00.
+- Supplier bills in another currency (`20261121100000`, stage 4a): a bill
+  takes invoices' columns (`currency`, `fx_rate`, `fx_rate_source`,
+  `fx_rate_date`, `fx_rate_provider`, `fx_rate_reference`) and its lines a
+  copy of the rate with generated `amount_myr` and `sst_amount_myr`. The rate
+  is the one rule's (Bank Negara Malaysia's 17:00 selling rate, newest on or
+  before the bill date: `private.finance_sst_fx_rate`), or one typed by hand
+  with its source (`FIN43`); posting needs a rate (`FIN38`), and a rate marked
+  as BNM's must be the rule's for a date not after the bill date (`FIN39`).
+  The ledger posts the bill's ringgit (the category debited and Payable
+  credited with the sum of its rounded ringgit lines; SST stays part of the
+  cost), and every payable figure (Overview, Supplier Bills KPIs, Contacts,
+  the payables ageing, the assistant's payables) adds `balance_myr`. Nothing
+  pays a foreign bill in this stage: a payment out or a payment voucher
+  naming one is refused with `FIN41` (the payment form and the voucher picker
+  offer ringgit bills only), and a contra entry never sets one off (`FIN42`,
+  which now names bills too, through all of stage 4). A bill raised against a
+  purchase order is in the order's currency (`FIN49`); every order is in
+  ringgit until orders carry a currency. The finance assistant saves bills in
+  ringgit only, and a bill made from a receipt is a ringgit draft.
+  `finance_ledger_lines` already carries the payment-out realised line the
+  next stage needs; it reads only allocations' `amount_myr`/`carried_myr`,
+  which nothing writes on a bill allocation yet, so it is 0.
+- Payments out of bills in another currency (`20261121111000`, stage 4b):
+  `FIN41` is no longer raised. A foreign bill is paid from a ringgit account
+  on Payments Out, now: `finance_record_payment_out` takes the ringgit that
+  left the account as `payment->>'amount_myr'` (`FIN46` when it is missing,
+  not above 0, or NaN), refuses one asked as scheduled (`FIN47`), and asks one
+  currency per payment before anything is written (`FIN44`). The split stays
+  in the bills' currency; `private.finance_fx_settle` shares the ringgit over
+  it (in proportion, to the sen, the remainder to the largest, ties to the
+  lowest document id) and writes each allocation's `amount_myr` and
+  `carried_myr`, which `private.finance_fx_carried_bill` works out: the part at
+  the bill's rate, never more than the ringgit still open, or, for the payment
+  that brings the bill to zero, exactly the ringgit still open, so a bill paid
+  in full leaves Payable at 0.00. Carried less paid out is the realised gain
+  (above 0) or loss, posted to Realised Exchange Gain or Loss. A payment
+  voucher never names a foreign bill (`FIN47`; the voucher picker offers
+  ringgit bills only), so a member cannot pay one. Every Payments Out figure
+  (Paid this month, the trend, the method donut, To be paid) and Supplier
+  Bills' Paid this month add `paymentOutRinggit`. The finance assistant pays
+  ringgit bills only (`recordPaymentOutInRinggit`). Lines of
+  `20261121111000` that `supabase/tests/bendahara_fx_payments_out_check.sql`
+  cannot pin (a single session cannot observe them), kept by review of the
+  text:
+  - `bill_id` in `finance_fx_settle`'s tie key (inserts are in bill-id order).
+  - The up-front `for update` bill lock in `finance_record_payment_out`.
+  - The `for update` read of the bill's currency in
+    `finance_allocation_currency_guard` (a plain read is not observably
+    different alone).
+  - The bill lock in `finance_fx_settle` (nearly equivalent: the allocation
+    guard has already locked the bills).
+  - The FIN04 arm of `finance_fx_carried_bill` (unreachable: it runs only on a
+    posted bill, which always has a rate).
+- Bank and cash accounts in another currency (`20261122100000`, stage 5a): an
+  account's `currency` is chosen when it is added and never changes (granted
+  for insert only: `42501` on a change). Its opening balance is in that
+  currency and carries `opening_rate` (the one rule, BNM's 17:00 selling rate
+  for the opening date, marked `bnm` with its date, or typed, `manual`), set
+  by an owner or admin like the balance itself (`FIN14`); a balance in another
+  currency with no rate is `FIN38`, a `bnm` rate that is not the rule's figure
+  or is dated after the opening date `FIN39`. `opening_balance_myr` is
+  generated, and the opening entry posts it. `finance_transactions` carries
+  `currency`, `fx_rate`, `fx_rate_source`, `fx_rate_date` and `amount_myr`
+  (null on a ringgit account's movement, meaning the amount; every reader uses
+  `coalesce(amount_myr, amount)`), written only by
+  `finance_transaction_to_currency` and by functions that run as the owner. No
+  money moves on an account in another currency yet: any movement inserted on
+  one, or a draft moved onto one, is `FIN50`, and every money picker lists
+  ringgit accounts only. `finance_account_balances` appends the currency, the
+  rate and `balance_myr` (the ringgit book value), and
+  `finance_bank_transactions` the movement's currency, rate and ringgit;
+  Banking shows each account in its own currency and adds ringgit for Total
+  cash and the trend.
+- Money on an account in another currency (`20261122110000`, stage 5b): Record
+  payment on Invoices, Payments Out and Refunds take an account in another
+  currency for documents in that currency (`FIN51` for any other, an expense
+  included), and a category voucher and an income receipt (the new
+  `finance_record_cash_receipt`, record and post in one call) are paid from or
+  into one. The movement is in the account's currency, with its rate (the one
+  rule's for its date, or typed; `FIN38` without one, `FIN39` for a `bnm` rate
+  that is not the rule's figure or is dated after the movement), paid now by an
+  owner or admin (`FIN47` for scheduled or waiting for approval). The trigger
+  writes `amount_myr = round(amount x rate, 2)`; `private.finance_fx_settle`
+  shares that ringgit over the documents as for a ringgit account, so a
+  document paid in full leaves Receivable or Payable at 0.00 and the realised
+  difference posts on `fx_realised`. `FIN03` and "money out that settles no
+  document" compare a document in the payment's own currency with it.
+  `finance_transactions.fx_rate` has no default any more: a draft on such an
+  account (the draft functions write no rate) is `FIN50`, as is a draft moved
+  between accounts in different currencies and, until 5c, a side of a
+  transfer; a ringgit row still gets rate 1 from the trigger. The five payment
+  and cash-book views append the movement's currency and ringgit
+  (`transaction_currency`, `transaction_amount_myr`; `finance_payment_vouchers`
+  `currency`, `amount_myr`), and every cash-book total adds ringgit.
+- Transfers between a ringgit account and an account in another currency
+  (`20261122120000`, stage 5c): `finance_record_transfer` takes `to_amount`,
+  what arrived in the receiving account's currency (`FIN16` when it is
+  missing or not above 0; between two ringgit accounts it is left out, or must
+  equal the amount). Both sides hold one ringgit figure, the ringgit side's
+  amount: the other side keeps it as its `amount_myr` and its rate is
+  `round(ringgit / foreign, 10)`, source `transfer`, which
+  `finance_transaction_to_currency` keeps as written (never recomputed). The
+  pair check holds two sides in one currency to one amount and a ringgit side
+  and a foreign side to one ringgit figure (`FIN16`). The ledger posts that
+  figure on both lines and no gain or loss; a conversion at another rate than
+  book leaves a remainder in the account's ringgit book value for stage 6.
+  Two accounts not in ringgit, the same currency included, are `FIN52`
+  (`finance_record_transfer` and the pair check); `FIN50` no longer names a
+  side of a transfer. The form asks for both amounts when the currencies
+  differ, shows the rate they say, and hides foreign accounts from "To" when
+  "From" is foreign; Banking names the other side's amount on a transfer row.

@@ -1,5 +1,6 @@
 import {
   deleteInvoiceAction,
+  fxSstRateForAction,
   getInvoiceAction,
   postInvoiceAction,
   recordPaymentInAction,
@@ -28,6 +29,7 @@ import { SAMPLE_INVOICES, SAMPLE_PAYMENTS_IN, SAMPLE_TODAY } from './sales-sampl
 const ACTIONS: InvoiceActions = {
   save: saveInvoiceAction,
   saveAndPost: saveAndPostInvoiceAction,
+  fxRate: fxSstRateForAction,
   post: postInvoiceAction,
   voidInvoice: voidInvoiceAction,
   remove: deleteInvoiceAction,
@@ -70,6 +72,7 @@ export default async function InvoicesScreen() {
     listPaymentsIn(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
     canEdit ? listAccounts(ctx) : [],
     canEdit ? readFollowOn(ctx) : null,
   ]);

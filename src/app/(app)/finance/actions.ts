@@ -37,10 +37,13 @@ import {
   voidBill,
 } from '@/lib/finance/bills';
 import {
+  CASH_RECEIPT_MESSAGES,
   type SaveAndPostCashReceiptResult,
   cashReceiptIdInput,
   deleteCashReceipt,
   postCashReceipt,
+  recordCashReceipt,
+  recordCashReceiptInput,
   saveCashReceipt,
   saveCashReceiptInput,
   voidCashReceipt,
@@ -85,7 +88,8 @@ import {
   saveExpense,
   saveExpenseInput,
 } from '@/lib/finance/expenses';
-import { type FxDefault, defaultFxRate, fxRateForInput } from '@/lib/finance/fx-rates';
+import { type FxDefault, fxRateForInput } from '@/lib/finance/fx-rates';
+import { fxSstRate } from '@/lib/finance/sst-rate';
 import {
   INVOICE_MESSAGES,
   type InvoiceDetail,
@@ -677,17 +681,17 @@ export async function saveAndSendQuotationAction(input: unknown): Promise<SaveAn
 }
 
 /**
- * Bank Negara Malaysia's rate for a currency on a date: the newest 1700 middle rate on or before it, or null
- * when there is none. A read with the person's own session (every signed-in person may read the rates); only
- * a person who may edit has a form that asks, so only they are answered. Nothing is refreshed.
+ * The rate a quotation, an invoice, a bill, an RFQ or a purchase order in a currency, on a date, is offered: the SST rule's (src/lib/finance/sst-rate.ts),
+ * Bank Negara Malaysia's 17:00 selling rate on or before it, as exact text; or null when there is none. Read and
+ * answered to a person who may edit.
  */
-export async function fxRateForAction(input: unknown): Promise<FinResult<FxDefault | null>> {
+export async function fxSstRateForAction(input: unknown): Promise<FinResult<FxDefault | null>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
   const parsed = fxRateForInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
   try {
-    return { ok: true, data: await defaultFxRate(ctx.client, parsed.data.currency, parsed.data.date) };
+    return { ok: true, data: await fxSstRate(ctx.client, parsed.data.currency, parsed.data.date) };
   } catch (error) {
     console.error('[finance] an exchange rate could not be read:', error);
     return { ok: false, error: READ_FAILED };
@@ -915,6 +919,18 @@ export async function voidCashReceiptAction(input: unknown) {
 }
 export async function deleteCashReceiptAction(input: unknown) {
   return run(SALES_PATHS, cashReceiptIdInput, input, deleteCashReceipt);
+}
+
+/**
+ * Records income received into an account in another currency and posts it in one call, with its rate (stage 5b:
+ * a draft there cannot carry one). Posting a receipt is a sign-off: an owner or admin only, told so before anything
+ * is written.
+ */
+export async function recordCashReceiptAction(input: unknown) {
+  return run(SALES_PATHS, recordCashReceiptInput, input, recordCashReceipt, {
+    signOff: true,
+    signOffError: CASH_RECEIPT_MESSAGES.postedByDecider,
+  });
 }
 
 /** Saves the receipt as a draft, then posts it; see `saveThenPost`. Someone who may not sign off keeps the draft. */

@@ -1,5 +1,6 @@
 import {
   deleteCreditNoteAction,
+  fxSstRateForAction,
   issueCreditNoteAction,
   recordRefundAction,
   saveAndIssueCreditNoteAction,
@@ -25,6 +26,7 @@ const ACTIONS: CreditNoteActions = {
   voidNote: voidCreditNoteAction,
   remove: deleteCreditNoteAction,
   recordRefund: recordRefundAction,
+  fxRate: fxSstRateForAction,
 };
 
 export default async function CreditNotesScreen() {
@@ -40,6 +42,7 @@ export default async function CreditNotesScreen() {
     listCreditNotes(ctx),
     canEdit ? listInvoices(ctx) : [],
     canEdit ? listRefunds(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
     canEdit ? listAccounts(ctx) : [],
   ]);
   return (

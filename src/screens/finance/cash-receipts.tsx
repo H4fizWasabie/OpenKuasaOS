@@ -1,6 +1,8 @@
 import {
   deleteCashReceiptAction,
+  fxSstRateForAction,
   postCashReceiptAction,
+  recordCashReceiptAction,
   saveAndPostCashReceiptAction,
   saveCashReceiptAction,
   voidCashReceiptAction,
@@ -25,6 +27,8 @@ const ACTIONS: CashReceiptActions = {
   post: postCashReceiptAction,
   voidReceipt: voidCashReceiptAction,
   remove: deleteCashReceiptAction,
+  record: recordCashReceiptAction,
+  fxRate: fxSstRateForAction,
 };
 
 /**
@@ -46,6 +50,7 @@ export default async function CashReceiptsScreen() {
     listCashReceipts(ctx),
     canEdit ? listInvoices(ctx) : [],
     canEdit ? listPaymentsIn(ctx) : [],
+    // Stage 5b: every active account; the form offers one in another currency for income recorded at once.
     canEdit ? listAccounts(ctx) : [],
     canEdit ? listContacts(ctx) : [],
     canEdit ? listIncomeCategories(ctx) : [],

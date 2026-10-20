@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import type { CashReceiptRow } from '@/lib/finance/cash-book';
 import {
   cashReceiptActions,
@@ -29,6 +30,7 @@ import {
 import { saveCashReceiptInput } from '@/lib/finance/cash-receipts';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinanceAccount, PaymentInRow } from '@/lib/finance/money';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const AISYAH = '11111111-1111-4111-8111-111111111111';
 const ZAKI = '22222222-2222-4222-8222-222222222222';
@@ -42,7 +44,7 @@ const today = '2026-10-12';
 /** 1 → a valid uuid ending in 000000000001. */
 const invoiceId = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`;
 
-const invoice = (n: number, i: Partial<InvoiceListRow> = {}): InvoiceListRow => ({
+const invoice = (n: number, i: Partial<InvoiceListRow> = {}): InvoiceListRow => ringgitRow({
   id: invoiceId(n),
   invoice_no: `INV-${String(n).padStart(4, '0')}`,
   customer_id: AISYAH,
@@ -101,8 +103,8 @@ const receipt = (r: Partial<CashReceiptRow> = {}): CashReceiptRow => ({
 });
 
 const accounts: FinanceAccount[] = [
-  { id: TILL, name: 'Cash in Hand', kind: 'cash', bank_name: null },
-  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' },
+  { id: TILL, name: 'Cash in Hand', kind: 'cash', bank_name: null, currency: 'MYR' },
+  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' },
 ];
 const categories = [{ id: OTHER, name: 'Other income' }, { id: SALES, name: 'Sales' }];
 
@@ -125,6 +127,8 @@ describe('a new form', () => {
     expect(newCashReceiptForm(accounts, categories, today)).toEqual({
       kind: 'income', customerId: '', amounts: {}, payer: TYPED_PAYER, payerName: '', categoryId: '', amount: '',
       accountId: BANK, date: today, method: 'bank_transfer', reference: '', notes: '',
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
   });
   it('chooses the category when there is only one, and no account when there is none', () => {

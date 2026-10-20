@@ -170,14 +170,16 @@ describe('payment reads', () => {
     allocation_id: `alloc-${n}`, transaction_id: 'txn-1', number: 'RC-0001', txn_date: '2026-10-05', method: 'fpx',
     amount: '60.00', transaction_amount: '100.00', status: 'posted', reference: null, account_id: 'bank',
     account_name: 'Main Bank', invoice_id: `inv-${n}`, invoice_no: `INV-000${n}`, customer_name: 'Aisyah Trading',
+    // Stage 3b's four, as the view gives them (numeric as text).
+    currency: 'MYR', amount_myr: '60.00', carried_myr: '60.00', realised_myr: '0.00',
   });
 
   it('lists payments in from their view, one row per invoice, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1), row(2)], error: null });
     const rows = await listPaymentsIn(ctx);
     expect(rows).toEqual([
-      { ...row(1), amount: 60, transaction_amount: 100 },
-      { ...row(2), amount: 60, transaction_amount: 100 },
+      { ...row(1), amount: 60, transaction_amount: 100, amount_myr: 60, carried_myr: 60, realised_myr: 0 },
+      { ...row(2), amount: 60, transaction_amount: 100, amount_myr: 60, carried_myr: 60, realised_myr: 0 },
     ]);
     expect(calls[0]).toMatchObject({
       name: 'finance_payments_in',
@@ -186,7 +188,8 @@ describe('payment reads', () => {
       range: [0, PAYMENT_PAGE_SIZE - 1],
     });
     expect(calls[0].columns).toBe(
-      'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,invoice_id,invoice_no,customer_name',
+      'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,invoice_id,invoice_no,customer_name,' +
+        'currency,amount_myr,carried_myr,realised_myr,transaction_currency,transaction_amount_myr',
     );
   });
   it('reads on past a full page', async () => {
@@ -195,12 +198,13 @@ describe('payment reads', () => {
     expect(await listPaymentsIn(ctx)).toHaveLength(PAYMENT_PAGE_SIZE);
     expect(calls).toHaveLength(2);
   });
-  it('still lists payments out from their own view with the same columns as before', async () => {
+  it('still lists payments out from their own view, with the ringgit figures stage 4b reads', async () => {
     const { ctx, calls } = fakeFinance({ data: [], error: null });
     expect(await listPaymentsOut(ctx)).toEqual([]);
     expect(calls[0]).toMatchObject({ name: 'finance_payments_out', order: ['txn_date desc', 'allocation_id asc'] });
     expect(calls[0].columns).toBe(
-      'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,bill_id,bill_no,supplier_name',
+      'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,bill_id,bill_no,supplier_name,' +
+        'currency,amount_myr,carried_myr,realised_myr,transaction_currency,transaction_amount_myr',
     );
   });
   it('throws a read error for the screen’s error page', async () => {

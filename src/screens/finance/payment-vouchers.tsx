@@ -1,6 +1,7 @@
 import {
   approveVoucherAction,
   deleteVoucherAction,
+  fxSstRateForAction,
   markVoucherPaidAction,
   recordVoucherAction,
   rejectVoucherAction,
@@ -31,6 +32,7 @@ const ACTIONS: VoucherActions = {
   markPaid: markVoucherPaidAction,
   remove: deleteVoucherAction,
   voidVoucher: voidVoucherAction,
+  fxRate: fxSstRateForAction,
 };
 
 /**
@@ -53,6 +55,7 @@ export default async function PaymentVouchersScreen() {
   // about their purchase orders: the same three reads Payments Out makes for its own form. Anyone without the
   // form has none of those reads made for them.
   const [accounts, contacts, categories, payments, bills, allOrders] = await Promise.all([
+    // Stage 5b: every active account; the form offers one in another currency for a category voucher paid now.
     access.readsForm ? listAccounts(ctx) : [],
     access.readsForm ? listContacts(ctx) : [],
     access.readsForm ? listExpenseCategories(ctx) : [],

@@ -1,5 +1,6 @@
 import {
   deleteRefundAction,
+  fxSstRateForAction,
   markRefundPaidAction,
   recordRefundAction,
   voidRefundAction,
@@ -21,6 +22,7 @@ const ACTIONS: RefundActions = {
   markPaid: markRefundPaidAction,
   voidRefund: voidRefundAction,
   remove: deleteRefundAction,
+  fxRate: fxSstRateForAction,
 };
 
 export default async function RefundsScreen() {
@@ -36,6 +38,7 @@ export default async function RefundsScreen() {
     listRefunds(ctx),
     listInvoices(ctx),
     canEdit ? listCreditNotes(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
     canEdit ? listAccounts(ctx) : [],
   ]);
   return (
