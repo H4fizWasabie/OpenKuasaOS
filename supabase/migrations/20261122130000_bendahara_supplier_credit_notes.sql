@@ -480,14 +480,27 @@ create trigger finance_bill_void_credit
   execute function private.finance_bill_void_credit();
 
 -- ---- views --------------------------------------------------------------------------
--- supplier_bill_totals: the text 20261119100000 (contra entries) gave it, with
--- "credited" appended after its "set_off", so "create or replace" keeps the
--- view, its grants and what reads it. balance and display_status take applied
--- credit off as well as set-off; paid is still only posted money out.
+-- supplier_bill_totals (create or replace): main's current body as 20261121100000
+-- (bendahara bill currency) left it, with one lateral and one output column added
+-- for supplier credit notes. "credited" is the issued credit applied to the bill;
+-- balance, the Paid test and balance_myr take it off as well as set-off, exactly as
+-- they already take off the MYR-only contra "set_off" with no conversion (a supplier
+-- credit note is MYR-only, so credited is ringgit). paid is still only posted money
+-- out. "credited" is appended last so "create or replace" keeps the view and grants.
 create or replace view public.supplier_bill_totals with (security_invoker = true) as
 select
-  b.id, b.org_id, b.bill_no, b.supplier_ref, b.supplier_id, b.bill_date, b.due_date,
-  b.status, b.notes, b.created_at, b.updated_at, b.posted_at,
+  b.id,
+  b.org_id,
+  b.bill_no,
+  b.supplier_ref,
+  b.supplier_id,
+  b.bill_date,
+  b.due_date,
+  b.status,
+  b.notes,
+  b.created_at,
+  b.updated_at,
+  b.posted_at,
   c.name as supplier_name,
   coalesce(l.total, 0)::numeric(14,2) as total,
   coalesce(p.paid, 0)::numeric(14,2) as paid,
@@ -500,17 +513,33 @@ select
     else 'pending'
   end as display_status,
   coalesce(sc.set_off, 0)::numeric(14,2) as set_off,
+  -- 20261121100000: the bill's currency and rate, and its figures in ringgit (null while a foreign draft has no
+  -- rate). balance_myr is the ringgit still carried on the bill; paid_myr is what posted payments carried off it.
+  b.currency,
+  b.fx_rate,
+  b.fx_rate_source,
+  b.fx_rate_date,
+  b.fx_rate_provider,
+  b.fx_rate_reference,
+  (case when b.fx_rate is null then null else coalesce(l.subtotal_myr, 0) end)::numeric(14,2) as subtotal_myr,
+  (case when b.fx_rate is null then null else coalesce(l.sst_myr, 0) end)::numeric(14,2) as sst_myr,
+  (case when b.fx_rate is null then null else coalesce(l.subtotal_myr, 0) + coalesce(l.sst_myr, 0) end)::numeric(14,2) as total_myr,
+  (case when b.fx_rate is null then null
+        else coalesce(l.subtotal_myr, 0) + coalesce(l.sst_myr, 0) - coalesce(p.paid_myr, 0) - coalesce(sc.set_off, 0) - coalesce(k.credited, 0)
+   end)::numeric(14,2) as balance_myr,
+  (case when b.fx_rate is null then null else coalesce(p.paid_myr, 0) end)::numeric(14,2) as paid_myr,
   coalesce(k.credited, 0)::numeric(14,2) as credited
 from public.supplier_bills b
 join public.finance_contacts c on c.org_id = b.org_id and c.id = b.supplier_id
 left join lateral (
-  select sum(amount + sst_amount) as total
+  select sum(amount + sst_amount) as total, sum(amount_myr) as subtotal_myr, sum(sst_amount_myr) as sst_myr
   from public.supplier_bill_lines
   where org_id = b.org_id and bill_id = b.id
 ) l on true
 left join lateral (
   -- Only posted money out counts as paid.
-  select sum(a.amount) as paid
+  -- 20261121100000: and in ringgit, what each carried off the bill (the amount, for a ringgit bill).
+  select sum(a.amount) as paid, sum(coalesce(a.carried_myr, a.amount)) as paid_myr
   from public.finance_allocations a
   join public.finance_transactions t on t.org_id = a.org_id and t.id = a.transaction_id
   where a.org_id = b.org_id and a.bill_id = b.id and t.direction = 'out' and t.status = 'posted'
@@ -528,6 +557,7 @@ left join lateral (
   from public.finance_supplier_credit_applications a
   where a.org_id = b.org_id and a.bill_id = b.id
 ) k on true;
+-- "create or replace" keeps the grants it had; said again so this file can be read alone.
 revoke all on public.supplier_bill_totals from anon, authenticated, service_role;
 grant select on public.supplier_bill_totals to authenticated;
 
@@ -551,14 +581,16 @@ left join lateral (
 revoke all on public.finance_supplier_credit_note_totals from anon, authenticated, service_role;
 grant select on public.finance_supplier_credit_note_totals to authenticated;
 
--- finance_purchase_order_totals: the text 20261106090000 gave it, with the
--- issued credit notes on the order's bills taken off billed_total. A view's
--- "p.*" is fixed when the view is made, so it is made again.
-drop view public.finance_purchase_order_totals;
-
-create view public.finance_purchase_order_totals with (security_invoker = true) as
+-- finance_purchase_order_totals (create or replace): main's current body as
+-- 20261121120000 (purchase order currency) left it, with issued supplier credit
+-- notes on the order's bills taken off billed_total and the two over-billed flags.
+-- Only those three expressions change, so the column list is unchanged and "create
+-- or replace" keeps the view and its grants (no drop, so nothing that reads it breaks).
+create or replace view public.finance_purchase_order_totals with (security_invoker = true) as
 select
-  p.*,
+  p.id, p.org_id, p.supplier_id, p.rfq_id, p.po_no, p.po_date, p.expected_date, p.notes, p.status, p.created_by,
+  p.submitted_by, p.submitted_at, p.approved_by, p.approved_at, p.rejected_by, p.rejected_at, p.rejection_reason,
+  p.closed_at, p.cancelled_at, p.created_at, p.updated_at, p.payment_terms_days, p.delivery_address,
   c.name as supplier_name,
   r.rfq_no,
   coalesce(l.subtotal, 0)::numeric(14,2) as subtotal,
@@ -571,10 +603,17 @@ select
   end as delivery,
   -- What has arrived, at the order's prices and SST rates.
   coalesce(l.received, 0)::numeric(14,2) as received_total,
+  -- 20261122130000: issued supplier credit notes on the order's bills come off the billed figure.
   (coalesce(b.billed, 0) - coalesce(cn.credited, 0))::numeric(14,2) as billed_total,
   (coalesce(b.billed, 0) - coalesce(cn.credited, 0) > coalesce(l.subtotal, 0) + coalesce(l.sst, 0)) as over_billed,
   -- Billed for more than has arrived: the usual thing to catch before paying.
-  (coalesce(b.billed, 0) - coalesce(cn.credited, 0) > coalesce(l.received, 0)) as billed_over_received
+  (coalesce(b.billed, 0) - coalesce(cn.credited, 0) > coalesce(l.received, 0)) as billed_over_received,
+  -- 20261121120000: the currency, and the total in ringgit at the order's rate.
+  p.currency,
+  p.fx_rate,
+  p.fx_rate_source,
+  p.fx_rate_date,
+  (case when p.fx_rate is null then null else coalesce(l.total_myr, 0) end)::numeric(14,2) as total_myr
 from public.finance_purchase_orders p
 join public.finance_contacts c on c.org_id = p.org_id and c.id = p.supplier_id
 left join public.finance_rfqs r on r.org_id = p.org_id and r.id = p.rfq_id
@@ -584,7 +623,9 @@ left join lateral (
     sum(sst_amount) as sst,
     count(*) filter (where received_quantity > 0) as started,
     count(*) filter (where received_quantity < quantity) as outstanding,
-    sum(round(received_quantity * unit_price, 2) + round(received_quantity * unit_price * sst_rate / 100, 2)) as received
+    sum(round(received_quantity * unit_price, 2) + round(received_quantity * unit_price * sst_rate / 100, 2)) as received,
+    -- 20261121120000: each line and its SST in ringgit, rounded to the sen, then added.
+    sum(round(amount * p.fx_rate, 2) + round(sst_amount * p.fx_rate, 2)) as total_myr
   from public.finance_purchase_order_lines
   where org_id = p.org_id and purchase_order_id = p.id
 ) l on true
@@ -603,16 +644,18 @@ left join lateral (
   where sb.org_id = p.org_id and sb.purchase_order_id = p.id and sb.status <> 'void' and n.status = 'issued'
 ) cn on true;
 
+-- "create or replace" keeps the grants; said again, service_role named too.
 revoke all on public.finance_purchase_order_totals from anon, authenticated, service_role;
 grant select on public.finance_purchase_order_totals to authenticated;
 
 -- ---- the ledger ---------------------------------------------------------------------
--- finance_ledger_lines, replaced: the text 20261119100000 (contra entries) gave it,
--- with one more kind of entry, the supplier credit note. The same ten columns with the
--- same types, so "create or replace" keeps the view and everything that reads
--- it (finance_ledger_balances). An issued note debits Accounts Payable and
--- credits the bill's category (SST on a purchase is part of the cost, so the
--- whole amount goes there, as the bill's whole total did). Two lines, the same
+-- finance_ledger_lines, replaced: main's current body as 20261122100000 (account
+-- currency) left it, with one more kind of entry, the supplier credit note. The same
+-- ten columns with the same types, so "create or replace" keeps the view and everything
+-- that reads it (finance_ledger_balances). An issued note debits Accounts Payable and
+-- credits the bill's category (SST on a purchase is part of the cost, so the whole
+-- amount goes there, as the bill's whole total did). A supplier credit note is MYR-only,
+-- so its amount is already ringgit, as the ledger's other lines are. Two lines, the same
 -- amount, so it balances. A voided one is reversed on the day it was voided.
 create or replace view public.finance_ledger_lines with (security_invoker = true) as
 select
@@ -631,6 +674,9 @@ from (
   -- Mirrors finance_invoice_totals: subtotal is sum(amount), sst is
   -- sum(sst_amount), total is the two added. Every invoice credits the one
   -- account marked default_for = 'sales'.
+  -- 20261120100000: in ringgit, from the lines' generated amount_myr and
+  -- sst_amount_myr (equal to amount and sst_amount at rate 1), so a foreign
+  -- invoice posts its ringgit and a ringgit one posts what it always did.
   select
     i.org_id,
     'invoice:' || i.id::text as entry_key,
@@ -644,7 +690,7 @@ from (
   from public.finance_invoices i
   left join public.finance_contacts ct on ct.org_id = i.org_id and ct.id = i.customer_id
   cross join lateral (
-    select coalesce(sum(il.amount), 0) as subtotal, coalesce(sum(il.sst_amount), 0) as sst
+    select coalesce(sum(il.amount_myr), 0) as subtotal, coalesce(sum(il.sst_amount_myr), 0) as sst
     from public.finance_invoice_lines il
     where il.org_id = i.org_id and il.invoice_id = i.id
   ) t
@@ -667,6 +713,10 @@ from (
   -- SST is never more than its total); least() says so again. The invoice's
   -- lines are there, unchanged, whether the invoice is posted or has since
   -- been voided, so a voided credit note's two entries are the same numbers.
+  -- 20261120120000: in ringgit. The credit note's amount_myr (what it took
+  -- off the invoice, at the invoice's rate or the closing figure; null, so
+  -- the amount, for a ringgit invoice), and the share from the invoice's
+  -- ringgit lines. At rate 1 every figure is the one it was.
   select
     n.org_id,
     'credit_note:' || n.id::text,
@@ -681,18 +731,19 @@ from (
   left join public.finance_invoices i on i.org_id = n.org_id and i.id = n.invoice_id
   cross join lateral (
     select
-      coalesce(sum(il.amount), 0) + coalesce(sum(il.sst_amount), 0) as total,
-      coalesce(sum(il.sst_amount), 0) as sst
+      coalesce(sum(il.amount_myr), 0) + coalesce(sum(il.sst_amount_myr), 0) as total,
+      coalesce(sum(il.sst_amount_myr), 0) as sst
     from public.finance_invoice_lines il
     where il.org_id = n.org_id and il.invoice_id = n.invoice_id
   ) t
+  cross join lateral (select coalesce(n.amount_myr, n.amount) as amount_myr) m
   cross join lateral (
-    select least(coalesce(round(n.amount * t.sst / nullif(t.total, 0), 2), 0), n.amount) as sst_share
+    select least(coalesce(round(m.amount_myr * t.sst / nullif(t.total, 0), 2), 0), m.amount_myr) as sst_share
   ) sh
   cross join lateral (values
-    (null::uuid, null::text, null::uuid, null::uuid, 'sales'::text, (n.amount - sh.sst_share)::numeric, 0::numeric),
+    (null::uuid, null::text, null::uuid, null::uuid, 'sales'::text, (m.amount_myr - sh.sst_share)::numeric, 0::numeric),
     (null::uuid, 'sst_payable'::text, null::uuid, null::uuid, null::text, sh.sst_share::numeric, 0::numeric),
-    (null::uuid, 'receivable'::text, null::uuid, null::uuid, null::text, 0::numeric, n.amount::numeric)
+    (null::uuid, 'receivable'::text, null::uuid, null::uuid, null::text, 0::numeric, m.amount_myr::numeric)
   ) as v(acct, sys, bank, cat, dflt, debit, credit)
   where n.status = 'issued' or (n.status = 'void' and n.voided_at is not null)
 
@@ -768,9 +819,16 @@ from (
     v.acct, v.sys, v.bank, v.cat, v.dflt, v.debit, v.credit
   from public.finance_transactions t
   left join public.finance_contacts ct on ct.org_id = t.org_id and ct.id = t.contact_id
+  -- 20261122100000: the movement in ringgit (the amount on a ringgit account; amount_myr on one in another
+  -- currency). Every "rest" below is in ringgit too.
+  cross join lateral (select coalesce(t.amount_myr, t.amount) as amount_myr) m
   cross join lateral (
     select
       coalesce(sum(a.amount), 0) as allocated,
+      -- 20261120110000: what the split used of the payment, and what the documents carried, in ringgit.
+      -- Both are the amount for a ringgit document (null columns).
+      coalesce(sum(coalesce(a.amount_myr, a.amount)), 0) as allocated_myr,
+      coalesce(sum(coalesce(a.carried_myr, a.amount)), 0) as carried_myr,
       coalesce(sum(a.amount) filter (where a.expense_id is not null), 0) as expenses,
       count(a.invoice_id) + count(a.credit_note_id) as sales_documents
     from public.finance_allocations a
@@ -783,26 +841,48 @@ from (
         when k.sales_documents > 0 then 'refund'
         else 'payment_out'
       end as source,
-      case when t.category_id is not null then greatest(t.amount - k.allocated, 0) else 0 end as to_category
+      case when t.category_id is not null then greatest(m.amount_myr - k.allocated_myr, 0) else 0 end as to_category
   ) p
   cross join lateral (
     -- Only money out that is not a refund has a part for expenses.
     select
-      case when p.source = 'payment_out' then least(k.expenses, t.amount - p.to_category) else 0 end as to_expenses
+      case when p.source = 'payment_out' then least(k.expenses, m.amount_myr - p.to_category) else 0 end as to_expenses
   ) q
+  cross join lateral (
+    -- 20261120110000: realised exchange gain (above 0) or loss (below 0) on documents in another
+    -- currency: the ringgit received less the ringgit they carried (money in), or the ringgit they
+    -- carried less the ringgit paid out (a refund). 0 for ringgit documents, whose two figures are equal.
+    -- 20261121100000: a payment of bills too, as a refund: the ringgit the bills carried less the ringgit
+    -- paid out (spec "The difference"). Only 20261121110000 writes a bill allocation's figures; an expense,
+    -- a category payment and every ringgit bill have null columns, so carried = allocated and it is 0.
+    select
+      case p.source
+        when 'payment_in' then k.allocated_myr - k.carried_myr
+        when 'refund' then k.carried_myr - k.allocated_myr
+        when 'payment_out' then k.carried_myr - k.allocated_myr
+        else 0
+      end as realised
+  ) g
   cross join lateral (values
+    -- 20261122100000: the bank line in ringgit, amount_myr.
     (null::uuid, null::text, t.account_id, null::uuid, null::text,
-      (case when t.direction = 'in' then t.amount else 0 end)::numeric,
-      (case when t.direction = 'out' then t.amount else 0 end)::numeric),
+      (case when t.direction = 'in' then m.amount_myr else 0 end)::numeric,
+      (case when t.direction = 'out' then m.amount_myr else 0 end)::numeric),
     (null::uuid, case when p.source = 'payment_out' then 'payable' else 'receivable' end, null::uuid, null::uuid, null::text,
-      (case when t.direction = 'out' then t.amount - p.to_category - q.to_expenses else 0 end)::numeric,
-      (case when t.direction = 'in' then t.amount - p.to_category else 0 end)::numeric),
+      (case when t.direction = 'out'
+            then m.amount_myr - p.to_category - q.to_expenses
+                 + case when p.source in ('refund','payment_out') then k.carried_myr - k.allocated_myr else 0 end
+            else 0 end)::numeric,
+      (case when t.direction = 'in' then m.amount_myr - p.to_category - k.allocated_myr + k.carried_myr else 0 end)::numeric),
     (null::uuid, 'accrued_expenses'::text, null::uuid, null::uuid, null::text,
       q.to_expenses::numeric,
       0::numeric),
     (null::uuid, null::text, null::uuid, t.category_id, null::text,
       (case when t.direction = 'out' then p.to_category else 0 end)::numeric,
-      (case when t.direction = 'in' then p.to_category else 0 end)::numeric)
+      (case when t.direction = 'in' then p.to_category else 0 end)::numeric),
+    -- 20261120110000: the realised difference, a gain as a credit and a loss as a debit. 0 drops out.
+    (null::uuid, 'fx_realised'::text, null::uuid, null::uuid, null::text,
+      greatest(-g.realised, 0)::numeric, greatest(g.realised, 0)::numeric)
   ) as v(acct, sys, bank, cat, dflt, debit, credit)
   where t.transfer_id is null
     and (t.status = 'posted' or (t.status = 'void' and t.voided_at is not null and t.number is not null))
@@ -814,6 +894,9 @@ from (
   -- purchase is part of the cost, so the whole total goes to the bill's
   -- category. category_id is read from the table: that view's columns were
   -- fixed before the column existed.
+  -- 20261121100000: in ringgit, from the lines' generated amount_myr and
+  -- sst_amount_myr (equal to amount and sst_amount at rate 1), so a foreign
+  -- bill posts its ringgit and a ringgit one posts what it always did.
   select
     sb.org_id,
     'bill:' || sb.id::text,
@@ -827,7 +910,7 @@ from (
   from public.supplier_bills sb
   left join public.finance_contacts ct on ct.org_id = sb.org_id and ct.id = sb.supplier_id
   cross join lateral (
-    select coalesce(sum(bl.amount + bl.sst_amount), 0) as total
+    select coalesce(sum(bl.amount_myr + bl.sst_amount_myr), 0) as total
     from public.supplier_bill_lines bl
     where bl.org_id = sb.org_id and bl.bill_id = sb.id
   ) t
@@ -840,8 +923,11 @@ from (
   union all
 
   -- ---- supplier credit note: issued, or voided after it was issued -----------------
-  -- Mirrors finance_supplier_credit_note_totals. The bill's category is read
-  -- from the table, as the bill's own entry does.
+  -- Mirrors finance_supplier_credit_note_totals. A supplier credit note is MYR-only
+  -- (no amount_myr column), so n.amount is its ringgit, as the ledger needs. An issued
+  -- note debits Accounts Payable and credits the bill's category (the whole amount, as
+  -- the bill's own entry put the whole total there). A voided one is reversed on the
+  -- day it was voided by the outer query, as every other void.
   select
     n.org_id,
     'supplier_credit_note:' || n.id::text,
@@ -916,9 +1002,11 @@ from (
     on i.org_id = o.org_id and i.transfer_id = o.transfer_id and i.direction = 'in'
   left join public.finance_accounts fa on fa.org_id = o.org_id and fa.id = o.account_id
   left join public.finance_accounts ta on ta.org_id = i.org_id and ta.id = i.account_id
+  -- 20261122100000: one ringgit figure on both lines, the paying side's (the pair check holds both sides'
+  -- ringgit equal; on two ringgit accounts it is the amount).
   cross join lateral (values
-    (null::uuid, null::text, i.account_id, null::uuid, null::text, o.amount::numeric, 0::numeric),
-    (null::uuid, null::text, o.account_id, null::uuid, null::text, 0::numeric, o.amount::numeric)
+    (null::uuid, null::text, i.account_id, null::uuid, null::text, coalesce(o.amount_myr, o.amount)::numeric, 0::numeric),
+    (null::uuid, null::text, o.account_id, null::uuid, null::text, 0::numeric, coalesce(o.amount_myr, o.amount)::numeric)
   ) as v(acct, sys, bank, cat, dflt, debit, credit)
   where o.transfer_id is not null and o.direction = 'out'
     and ((o.status = 'posted' and i.status = 'posted')
@@ -941,12 +1029,14 @@ from (
     'Opening balance of ' || a.name,
     null::date,
     v.acct, v.sys, v.bank, v.cat, v.dflt, v.debit, v.credit
+  -- 20261122100000: in ringgit, opening_balance_myr (the opening balance at its rate; the balance itself on a
+  -- ringgit account). One whose ringgit rounds to 0.00 drops out as a line with no amount.
   from public.finance_accounts a
   cross join lateral (values
     (null::uuid, null::text, a.id, null::uuid, null::text,
-      greatest(a.opening_balance, 0)::numeric, greatest(-a.opening_balance, 0)::numeric),
+      greatest(a.opening_balance_myr, 0)::numeric, greatest(-a.opening_balance_myr, 0)::numeric),
     (null::uuid, 'opening_equity'::text, null::uuid, null::uuid, null::text,
-      greatest(-a.opening_balance, 0)::numeric, greatest(a.opening_balance, 0)::numeric)
+      greatest(-a.opening_balance_myr, 0)::numeric, greatest(a.opening_balance_myr, 0)::numeric)
   ) as v(acct, sys, bank, cat, dflt, debit, credit)
   where a.opening_balance <> 0 and a.opening_balance <> 'NaN'
 
@@ -1153,10 +1243,14 @@ begin
     raise exception 'the BEFORE triggers on supplier_bills are not in the order this file needs: %', names;
   end if;
 
+  -- Only the relations this file creates: a pattern over finance_% would also catch
+  -- finance_fx_rates/finance_fx_latest_rates/finance_fx_fetch_state, which 20261119150000
+  -- grants to service_role on purpose, and roll this file back every time.
   select string_agg(c.relname, ',' order by c.relname) into left_over
     from pg_catalog.pg_class c
    where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm')
-     and (c.relname like 'finance\_%' or c.relname like 'supplier\_bill%')
+     and c.relname in ('finance_supplier_credit_notes', 'finance_supplier_credit_applications',
+                       'finance_supplier_credit_note_totals')
      and exists (select 1 from aclexplode(c.relacl) a where a.grantee = 'service_role'::regrole);
   if left_over is not null then
     raise exception 'service_role still holds a privilege on: %', left_over;

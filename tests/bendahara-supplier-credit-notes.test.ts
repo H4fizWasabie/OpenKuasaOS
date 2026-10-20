@@ -3,7 +3,7 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
-// Supplier credit notes against the hosted database (20261120090000): the
+// Supplier credit notes against the hosted database (20261122130000): the
 // note, its credit on a bill, the figures that follow, the books. Every
 // workspace is made through tests/helpers/live-workspaces.ts, which deletes
 // what it creates.

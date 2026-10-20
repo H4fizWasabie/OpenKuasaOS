@@ -1793,7 +1793,7 @@ can still be; a void one offers nothing.
 
 ## Supplier credit notes
 
-`20261120090000_bendahara_supplier_credit_notes` (tables and rules only; the
+`20261122130000_bendahara_supplier_credit_notes` (tables and rules only; the
 screen is not built yet). A supplier credit note is one
 `finance_supplier_credit_notes` row: one amount against one posted supplier bill,
 a `reason` (`overpaid`, `returned_goods`, `short_delivery`, `other`), the
