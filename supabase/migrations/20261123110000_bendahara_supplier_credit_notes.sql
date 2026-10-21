@@ -26,17 +26,17 @@
 --   * a note goes against a posted bill, and all the issued notes of a bill
 --     together never exceed the bill's total (FIN04, FIN05);
 --   * the applications of a note never exceed the note, go only to a posted
---     bill of the same supplier (FIN04, FIN42), and the payments and credit on
+--     bill of the same supplier (FIN04, FIN58), and the payments and credit on
 --     a bill never exceed its total (FIN05);
 --   * a note is voided only while its credit is used on nothing but its own
---     bill; voiding takes that off again (FIN41). To void one whose credit was
+--     bill; voiding takes that off again (FIN57). To void one whose credit was
 --     used on a later bill, take it off that bill first;
 --   * a bill cannot be voided while a draft or issued note is against it, or
---     while credit is applied to it (FIN43);
+--     while credit is applied to it (FIN59);
 --   * issuing and voiding a note, applying credit and taking it off need an
 --     owner or admin, as posting and voiding a bill do (FIN14).
 --
--- Error codes: FIN41, FIN42, FIN43 are new (the highest before this file is FIN40).
+-- Error codes: FIN57, FIN58, FIN59 are new (the highest before this file is FIN56).
 
 -- Fail fast instead of queueing behind a long transaction and stalling sign-ins.
 set local lock_timeout = '5s';
@@ -45,9 +45,9 @@ set local lock_timeout = '5s';
 alter table public.finance_sequences
   drop constraint finance_sequences_doc_type_check,
   add constraint finance_sequences_doc_type_check
-    check (doc_type in ('invoice','quotation','credit_note','bill','receipt','voucher','transfer','rfq','purchase_order','journal','contra','supplier_credit_note'));
+    check (doc_type in ('invoice','quotation','credit_note','bill','receipt','voucher','transfer','rfq','purchase_order','journal','contra','fx_revaluation','supplier_credit_note'));
 
--- The body of 20261119100000_bendahara_contra_entries.sql (the newest on main) with
+-- The body of 20261123100000_bendahara_fx_revaluation.sql (the newest on main) with
 -- one line added: 'supplier_credit_note' gives 'SCN-'. It stays "security definer".
 create or replace function public.finance_next_number(target_org uuid, doc text)
 returns text
@@ -76,6 +76,8 @@ begin
     when 'purchase_order' then 'PO-'
     when 'journal' then 'JV-'
     when 'contra' then 'CT-'
+    -- 20261123100000: a month-end FX revaluation.
+    when 'fx_revaluation' then 'FX-'
     when 'supplier_credit_note' then 'SCN-'
   end;
   if default_prefix is null then
@@ -220,7 +222,7 @@ begin
         select 1 from public.finance_supplier_credit_applications a
         where a.org_id = old.org_id and a.credit_note_id = old.id and a.bill_id <> old.bill_id
       ) then
-        raise exception 'the credit has been used on another bill; take it off that bill first' using errcode = 'FIN41';
+        raise exception 'the credit has been used on another bill; take it off that bill first' using errcode = 'FIN57';
       end if;
       -- What it took off its own bill is owed again.
       delete from public.finance_supplier_credit_applications
@@ -313,7 +315,7 @@ begin
   end if;
   select supplier_id into home from public.supplier_bills where org_id = new.org_id and id = note.bill_id;
   if target.supplier_id is distinct from home then
-    raise exception 'credit can only be applied to a bill from the same supplier' using errcode = 'FIN42';
+    raise exception 'credit can only be applied to a bill from the same supplier' using errcode = 'FIN58';
   end if;
 
   select coalesce(sum(amount), 0) into used
@@ -467,7 +469,7 @@ begin
     select 1 from public.finance_supplier_credit_applications a
     where a.org_id = old.org_id and a.bill_id = old.id
   ) then
-    raise exception 'a bill with a supplier credit note or credit on it cannot be voided' using errcode = 'FIN43';
+    raise exception 'a bill with a supplier credit note or credit on it cannot be voided' using errcode = 'FIN59';
   end if;
   return new;
 end $$;
@@ -603,7 +605,7 @@ select
   end as delivery,
   -- What has arrived, at the order's prices and SST rates.
   coalesce(l.received, 0)::numeric(14,2) as received_total,
-  -- 20261122130000: issued supplier credit notes on the order's bills come off the billed figure.
+  -- 20261123110000: issued supplier credit notes on the order's bills come off the billed figure.
   (coalesce(b.billed, 0) - coalesce(cn.credited, 0))::numeric(14,2) as billed_total,
   (coalesce(b.billed, 0) - coalesce(cn.credited, 0) > coalesce(l.subtotal, 0) + coalesce(l.sst, 0)) as over_billed,
   -- Billed for more than has arrived: the usual thing to catch before paying.
@@ -649,8 +651,8 @@ revoke all on public.finance_purchase_order_totals from anon, authenticated, ser
 grant select on public.finance_purchase_order_totals to authenticated;
 
 -- ---- the ledger ---------------------------------------------------------------------
--- finance_ledger_lines, replaced: main's current body as 20261122100000 (account
--- currency) left it, with one more kind of entry, the supplier credit note. The same
+-- finance_ledger_lines, replaced: main's current body as 20261123100000 (fx
+-- revaluation) left it, with one more kind of entry, the supplier credit note. The same
 -- ten columns with the same types, so "create or replace" keeps the view and everything
 -- that reads it (finance_ledger_balances). An issued note debits Accounts Payable and
 -- credits the bill's category (SST on a purchase is part of the cost, so the whole
@@ -1070,6 +1072,51 @@ from (
     (null::uuid, 'receivable'::text, null::uuid, null::uuid, null::text, 0::numeric, k.amount::numeric)
   ) as v(acct, sys, bank, cat, dflt, debit, credit)
   where k.status = 'posted' or (k.status = 'void' and k.voided_at is not null)
+
+  union all
+
+  -- ---- FX revaluation: a posted run on its month end, and its reversal the next day ---------
+  -- 20261123100000. Stored figures only (posted_myr of each line of the run). Per ledger account, d is the
+  -- change in its debit balance: posted_myr for invoices (Receivable) and accounts (the account's own
+  -- ledger account), -posted_myr for bills (Payable: owing more is a credit). Each account's line is Dr
+  -- max(d, 0), Cr max(-d, 0); one Unrealised line takes D = -sum(d) the same way, so debits - credits =
+  -- sum(d) - sum(d) = 0: the entry balances by construction. The reversal is made here, sides swapped
+  -- and dated period_end + 1, keyed ':reverse'; the outer void device does not apply (voided_on is null).
+  -- The run's per-currency, per-document detail is on its lines (plan decision 9).
+  select
+    r.org_id,
+    'fx_revaluation:' || r.id::text || case when rv.rev then ':reverse' else '' end,
+    r.period_end + case when rv.rev then 1 else 0 end,
+    'fx_revaluation'::text,
+    r.id,
+    r.revaluation_no,
+    concat_ws(' ', case when rv.rev then 'Reversal of FX revaluation' else 'FX revaluation' end,
+              r.revaluation_no, 'at', to_char(r.period_end, 'YYYY-MM-DD')),
+    null::date,
+    v.acct, v.sys, v.bank, v.cat, v.dflt,
+    case when rv.rev then v.credit else v.debit end,
+    case when rv.rev then v.debit else v.credit end
+  from public.finance_fx_revaluations r
+  cross join lateral (
+    select x.sys, x.bank, sum(x.d) as d
+    from (
+      select case ln.kind when 'invoice' then 'receivable' when 'bill' then 'payable' end as sys,
+             ln.account_id as bank,
+             case when ln.kind = 'bill' then -ln.posted_myr else ln.posted_myr end as d
+      from public.finance_fx_revaluation_lines ln
+      where ln.org_id = r.org_id and ln.revaluation_id = r.id
+    ) x
+    group by x.sys, x.bank
+    union all
+    select 'fx_unrealised'::text, null::uuid,
+           -sum(case when ln.kind = 'bill' then -ln.posted_myr else ln.posted_myr end)
+    from public.finance_fx_revaluation_lines ln
+    where ln.org_id = r.org_id and ln.revaluation_id = r.id
+  ) g
+  cross join lateral (values
+    (null::uuid, g.sys, g.bank, null::uuid, null::text, greatest(g.d, 0)::numeric, greatest(-g.d, 0)::numeric)
+  ) as v(acct, sys, bank, cat, dflt, debit, credit)
+  cross join lateral (values (false), (true)) as rv(rev)
 
   union all
 

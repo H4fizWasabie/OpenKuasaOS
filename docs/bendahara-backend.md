@@ -1793,7 +1793,7 @@ can still be; a void one offers nothing.
 
 ## Supplier credit notes
 
-`20261122130000_bendahara_supplier_credit_notes` (tables and rules only; the
+`20261123110000_bendahara_supplier_credit_notes` (tables and rules only; the
 screen is not built yet). A supplier credit note is one
 `finance_supplier_credit_notes` row: one amount against one posted supplier bill,
 a `reason` (`overpaid`, `returned_goods`, `short_delivery`, `other`), the
@@ -1808,7 +1808,7 @@ how much of a note (`credit_note_id`, `bill_id`, `amount`; one row per note and
 bill). On issue the note is applied to its own bill, up to what that bill still
 owes: its total, less payments (posted, or waiting to be paid) and credit
 already on it. What is left stays open on the supplier, and an owner or admin
-applies it to a later posted bill of the same supplier (`FIN42` for another
+applies it to a later posted bill of the same supplier (`FIN58` for another
 supplier's bill). The applications of a note never exceed the note, and the
 payments and credit on a bill never exceed its total (`FIN05`): the guard on
 applications checks the second from the credit side, and
@@ -1834,9 +1834,9 @@ A void posts a reversal on the day it was voided, as for the other documents.
 **Void.** Issuing and voiding need an owner or admin (`FIN14`), as do putting
 credit on a bill and taking it off. A note is voided only while its credit is on
 its own bill alone; voiding takes that off again, so the bill owes it. If the
-credit has been used on another bill, take it off that bill first (`FIN41`). A
+credit has been used on another bill, take it off that bill first (`FIN57`). A
 bill cannot be voided while a draft or issued note is against it, or while
-credit is applied to it (`FIN43`).
+credit is applied to it (`FIN59`).
 
 **With contra entries.** `supplier_bill_totals` keeps its `set_off` column and takes both it and
 `credited` off `balance`. Payments, posted contra entries and applied credit together may not pass a
@@ -2227,9 +2227,9 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN32` | An invoice or bill that a posted contra entry sets off is not voided. `bills.ts` and `invoices.ts`: "A contra entry sets this off. Void the contra entry first." |
 | `FIN33` | Refunds on an invoice depend on a contra entry, so it is not voided. `contras.ts` |
 | `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map; `transfers.ts` words it as it words `FIN16`. A member recording a payment in, a refund or a paid-now payment out on an archived account is answered `FIN37` (the draft is refused before the sign-off rule), where before this rule they were answered `FIN14`; posting, approving and marking paid by a member still answer `FIN14`. |
-| `FIN41` | A supplier credit note cannot be voided while its credit is used on another bill: take it off that bill first |
-| `FIN42` | Credit can only be applied to a bill from the same supplier as the credit note |
-| `FIN43` | A bill with a draft or issued supplier credit note against it, or with credit applied to it, cannot be voided |
+| `FIN57` | A supplier credit note cannot be voided while its credit is used on another bill: take it off that bill first |
+| `FIN58` | Credit can only be applied to a bill from the same supplier as the credit note |
+| `FIN59` | A bill with a draft or issued supplier credit note against it, or with credit applied to it, cannot be voided |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with
@@ -3188,3 +3188,33 @@ with no date).
   side of a transfer. The form asks for both amounts when the currencies
   differ, shows the rate they say, and hides foreign accounts from "To" when
   "From" is foreign; Banking names the other side's amount on a transfer row.
+- Month-end FX revaluation (`20261123100000`, stage 6a): every workspace has
+  Unrealised Exchange Gain or Loss (`fx_unrealised`, 4910, income). At a month
+  end E (the last day of a month, on or before today in Malaysia: `FIN53`)
+  `private.finance_fx_revaluation_items` works out every foreign item in the
+  books on E (an open foreign invoice, an open foreign bill, a foreign bank or
+  cash account, archived ones included) from the stored figures, with the
+  ledger's own rule for what is in the books on a day, voids included
+  (`private.finance_fx_weight`): its foreign balance, the ringgit it carries
+  (an account's book value includes posted journals on its ledger account),
+  what it revalues to at the closing rate (`round(balance x rate, 2)`; 0 for
+  a balance of 0, which needs no rate), the difference, what earlier runs for
+  E already posted, and what this run posts. The closing rate is BNM's 17:00
+  selling rate per one unit, the newest on or before E
+  (`private.finance_fx_closing_rate`, never the stored middle `rate`), or
+  typed (`manual`); a `bnm` rate that is not the rule's figure and date is
+  `FIN39`, a missing or unusable one `FIN38`. `finance_fx_revaluation_preview`
+  (any member) shows the items and fills BNM's rate where none is sent;
+  `finance_post_fx_revaluation` (an owner or admin, `FIN14`) works them out
+  again under a lock and posts them only if every item (the preview's digest of
+  each item's figures), the number of lines and the net gain are what the
+  caller saw (`FIN55`), never for an earlier month end than
+  one already posted (`FIN54`) and never with nothing to post (`FIN56`; no
+  number is used). A run (`FX-0001`) with its rates and lines is written whole
+  and never changed or deleted (`FIN01`, even by the table owner); the three
+  tables grant the signed-in select only. `finance_ledger_lines` posts each run
+  net per ledger account (Receivable, Payable the other way round, each
+  revalued bank account) with one Unrealised line that balances it, dated E,
+  and the same lines swapped on E + 1 (`fx_revaluation:<id>:reverse`); Cash
+  Flow shows a bank account's line as "Exchange rate changes on foreign cash
+  (no money moved)". A second run for E posts only the change, item by item.

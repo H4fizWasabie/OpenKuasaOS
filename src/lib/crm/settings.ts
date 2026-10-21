@@ -182,17 +182,15 @@ export type ExportContact = {
 
 const EXPORT_COLUMNS = 'first_name,last_name,email,phone,company,country,status,source,tags,created_at';
 
-/** A phone number written with its country code: digits and spacing after a plus, nothing a spreadsheet would run. */
-const PLUS_PHONE = /^\+[\d\s()-]+$/;
-
 /**
  * One CSV cell, always in quotes so no spreadsheet setting can split it. A
- * value a spreadsheet would run as a formula is made plain text first: names
- * and companies come from public forms. A phone number that begins with a
- * plus is left as it is, so the file can be imported again unchanged.
+ * value a spreadsheet would work out is made plain text with an apostrophe in
+ * front: names and companies come from public forms, and a phone number such
+ * as +60-12-345 6789 would otherwise show as a sum. The contacts import drops
+ * that apostrophe again, so the file imports unchanged.
  */
 function cell(value: string): string {
-  const safe = /^[=+\-@\t\r]/.test(value) && !PLUS_PHONE.test(value) ? `'${value}` : value;
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
@@ -225,14 +223,15 @@ export async function listContactsForExport(
 ): Promise<{ contacts: ExportContact[]; complete: boolean }> {
   const contacts: ExportContact[] = [];
   // Read until a page comes back empty: the server may hand out fewer rows a page than were asked for.
-  while (contacts.length < EXPORT_CONTACTS_MAX) {
+  // It reads one row past the limit, so a workspace with exactly the limit is still known to be complete.
+  while (contacts.length <= EXPORT_CONTACTS_MAX) {
     const { data, error } = await client
       .from('crm_contacts')
       .select(EXPORT_COLUMNS)
       .eq('org_id', orgId)
       .order('created_at', { ascending: true })
       .order('id', { ascending: true })
-      .range(contacts.length, contacts.length + EXPORT_PAGE_SIZE - 1);
+      .range(contacts.length, Math.min(contacts.length + EXPORT_PAGE_SIZE - 1, EXPORT_CONTACTS_MAX));
     if (error) throw error;
     const page = (data ?? []) as unknown as ExportContact[];
     if (page.length === 0) return { contacts, complete: true };
