@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
+import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
 import type { RecordPayment } from '@/components/finance/allocation-form-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { CreditNoteFormCard, type CreditNoteFormActions } from '@/components/finance/credit-note-form-card';
@@ -38,6 +39,7 @@ import { Input } from '@/components/ui/input';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { type CreditNoteSaved, creditNoteSavedNote, creditableInvoices } from '@/lib/finance/credit-note-form';
@@ -152,11 +154,14 @@ export function InvoicesView({
   rows,
   view,
   writer,
+  agentNotes,
 }: {
   /** Every invoice, newest first; drafts and void ones included. */
   rows: InvoiceListRow[];
   view: InvoicesViewData;
   writer?: InvoicesWriter;
+  /** Notes the agent left, by document id, for the ids shown. Absent with no database or when they could not be read. */
+  agentNotes?: NoteCounts;
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<InvoiceFilter>('open');
@@ -435,7 +440,7 @@ export function InvoicesView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Invoices"
-        subtitle="Sales invoices and their e-Invois status, Saudara."
+        subtitle="Sales invoices and their e-Invois status."
         actions={
           writer ? (
             <Button
@@ -587,7 +592,10 @@ export function InvoicesView({
                   const items = writer ? menu(i, writer.actions) : [];
                   return (
                     <TableRow key={i.id} className={cn(i.display_status === 'void' && 'opacity-60')}>
-                      <TableCell className="whitespace-nowrap font-medium">{i.invoice_no ?? '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">
+                        {i.invoice_no ?? '—'}
+                        <AgentNoteMarker note={agentNotes?.[i.id]} />
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.invoice_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{i.customer_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.due_date)}</TableCell>

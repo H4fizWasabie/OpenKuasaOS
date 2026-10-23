@@ -243,6 +243,22 @@ export async function listSupplierCreditNotes(ctx: FinanceWriteContext): Promise
 }
 
 /** Open credit by supplier: what issued notes still have to apply. Suppliers with none are left out. */
+/**
+ * The supplier credit notes for a page that only shows them alongside something else (Supplier Bills):
+ * a failed read is logged and gives none, so the page still loads.
+ */
+export async function supplierCreditNotesOrNone(
+  read: () => Promise<SupplierCreditNoteRow[]>,
+  log: (message: string, error: unknown) => void = console.error,
+): Promise<SupplierCreditNoteRow[]> {
+  try {
+    return await read();
+  } catch (error) {
+    log('[finance] the supplier credit notes could not be read:', error);
+    return [];
+  }
+}
+
 export function openCreditBySupplier(rows: Pick<SupplierCreditNoteRow, 'supplier_id' | 'status' | 'open_amount'>[]): Record<string, number> {
   const open: Record<string, number> = {};
   for (const r of rows) {

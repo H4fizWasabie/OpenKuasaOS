@@ -40,6 +40,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'crm/reports',
   // The deal rule, the person's own notifications and the contacts export; the rest links to where it is set.
   'crm/settings',
+  // The workspace's real connections and their state; what is not built is listed as not available.
+  'crm/plugins',
 
   // Lekir: jobs, applications, candidates, interviews and the talent pool can be changed.
   // Settings saves the application form and links to where the rest is set.
@@ -89,6 +91,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Bendahara. Dashboard and Overview read the books (2026-10-23); the Overview's cards with no
   // source say so, and its demo still shows fixed figures.
   'finance/assistant',
+  // The focus agent: it suggests notes on documents for a writer to approve.
+  'finance/agents',
   'finance/dashboard',
   'finance/customers-suppliers',
   'finance/products',

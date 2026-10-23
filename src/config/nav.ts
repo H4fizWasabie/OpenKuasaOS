@@ -11,7 +11,6 @@ import {
   ClipboardCheck,
   ClipboardList,
   CalendarDays,
-  SlidersHorizontal,
   TrendingUp,
   MessageSquare,
   Zap,
@@ -55,6 +54,7 @@ import { type NavNeed, canSee } from '@/lib/auth/permissions';
 export type NavBadgeKey =
   | 'pendingProposals'
   | 'pendingCrmProposals'
+  | 'pendingFinanceProposals'
   | 'unreadAnnouncements'
   | 'awaitingAcknowledgement'
   | 'waitingLeave'
@@ -133,9 +133,9 @@ export const PRODUCTS: Product[] = [
         ],
       },
       {
-        label: 'Setup',
+        label: 'Configuration',
         items: [
-          { label: 'Ad Settings', slug: 'ad-settings', icon: SlidersHorizontal },
+          { label: 'Settings', slug: 'ad-settings', icon: Settings },
         ],
       },
     ],
@@ -316,7 +316,7 @@ export const PRODUCTS: Product[] = [
         label: 'Overview',
         items: [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
-          { label: 'AI Agents', slug: 'agents', icon: Bot },
+          { label: 'AI Agents', slug: 'agents', icon: Bot, badge: 'pendingFinanceProposals' },
           { label: 'Dashboard', slug: 'dashboard', icon: TrendingUp },
         ],
       },
@@ -382,7 +382,7 @@ export const PRODUCTS: Product[] = [
       {
         label: 'Configuration',
         items: [
-          { label: 'Accounting Settings', slug: 'settings', icon: Settings },
+          { label: 'Settings', slug: 'settings', icon: Settings },
         ],
       },
     ],

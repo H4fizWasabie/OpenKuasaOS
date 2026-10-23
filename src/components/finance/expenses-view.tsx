@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Ban, Banknote, Check, Download, FileText, Pencil, PieChart, Plus, Search, Tags, Trash2, TrendingUp } from 'lucide-react';
+import { Ban, Banknote, Check, Download, FileText, Pencil, PieChart, Plus, Search, Tags, Trash2, TrendingUp, Undo2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
+import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
 import { type CategoryActions, CategoriesCard } from '@/components/finance/categories-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
@@ -22,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import {
   EXPENSE_STATUS_LABELS,
@@ -63,6 +65,8 @@ import { cn } from '@/lib/utils';
 export type ExpenseActions = ExpenseFormActions & {
   approve: (input: unknown) => Promise<FinResult<{ id: string }>>;
   reject: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** Sends an approved expense back to pending, with a reason. Only ever called for someone who may decide. */
+  sendBack: (input: unknown) => Promise<FinResult<{ id: string }>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Marks an approved expense paid. Only ever called for someone who may decide. */
   pay: ExpensePayAction;
@@ -100,15 +104,15 @@ type Open =
   | { kind: 'form'; today: string; editing?: ExpenseRow }
   | { kind: 'pay'; today: string; row: ExpenseRow }
   | { kind: 'categories' }
-  | { kind: 'approve' | 'reject' | 'delete'; row: ExpenseRow }
+  | { kind: 'approve' | 'reject' | 'sendBack' | 'delete'; row: ExpenseRow }
   | null;
 
 /**
  * Expenses: figures, charts and the table, with search, category and status
  * filters, "View all" and Export. A person who may edit (`writer`) also gets
  * New expense, and Edit and Delete on a pending or rejected expense; an owner
- * or admin also gets Approve and Reject on a pending one, and Reject on an
- * approved one that no payment stands against, and Mark paid on an approved
+ * or admin also gets Approve and Reject on a pending one, Send back and Reject
+ * on an approved one that no payment stands against, and Mark paid on an approved
  * one with anything left to pay. Each row's menu holds only what the database
  * will let that person do (`expenseActions`).
  */
@@ -119,6 +123,7 @@ export function ExpensesView({
   receipts,
   receiptLinkOf,
   writer,
+  agentNotes,
 }: {
   /** Every expense, newest first; pending and rejected ones included. */
   rows: ExpenseRow[];
@@ -131,6 +136,8 @@ export function ExpensesView({
   /** False for sample data, which keeps its own fixed date. */
   followClock?: boolean;
   writer?: ExpensesWriter;
+  /** Notes the agent left, by document id, for the ids shown. Absent with no database or when they could not be read. */
+  agentNotes?: NoteCounts;
 }) {
   const today = useLocalToday(serverToday, followClock);
   const [query, setQuery] = useState('');
@@ -142,6 +149,8 @@ export function ExpensesView({
   const [written, setWritten] = useState<WrittenExpense | null>(null);
   // The payment just recorded: it is a voucher, which shows on another screen, so the note is always shown.
   const [paid, setPaid] = useState<ExpensePaidNote | null>(null);
+  // Why the expense being sent back is sent back, as typed.
+  const [reason, setReason] = useState('');
   const confirm = useFinanceAction();
 
   const view = expensesView(rows, today);
@@ -169,6 +178,7 @@ export function ExpensesView({
     confirm.clear();
     setWritten(null);
     setPaid(null);
+    setReason('');
     setOpen(next);
   };
   /** Forgets an earlier write when the list changes under a note that is not showing, so a note never turns up later by itself. */
@@ -206,6 +216,8 @@ export function ExpensesView({
         return { label: 'Approve', icon: Check, opens: true, onSelect: () => ask({ kind: 'approve', row }) };
       case 'reject':
         return { label: 'Reject', icon: Ban, destructive: true, opens: true, onSelect: () => ask({ kind: 'reject', row }) };
+      case 'sendBack':
+        return { label: 'Send back', icon: Undo2, opens: true, onSelect: () => ask({ kind: 'sendBack', row }) };
       case 'delete':
         return { label: 'Delete', icon: Trash2, destructive: true, opens: true, onSelect: () => ask({ kind: 'delete', row }) };
       case 'pay':
@@ -280,6 +292,40 @@ export function ExpensesView({
         </ConfirmRow>
       );
     }
+    if (asking.kind === 'sendBack') {
+      return (
+        <ConfirmRow
+          key={row.id}
+          colSpan={columns}
+          tone="default"
+          icon={Undo2}
+          label={`Send back ${expenseName(row)}`}
+          confirmLabel="Send back"
+          pendingLabel="Sending back…"
+          pending={confirm.pending}
+          disabled={reason.trim() === ''}
+          error={confirm.error}
+          onConfirm={() =>
+            confirm.run(async () => {
+              const result = await actions.sendBack({ id: row.id, updated_at: row.updated_at, reason });
+              if (!result.ok && decisionIsStale(result.error)) setOpen(null);
+              return result;
+            }, close)
+          }
+          onCancel={close}
+        >
+          <span className="block">{words(expenseQuestion('sendBack', row))}</span>
+          <Input
+            aria-label="Why it is sent back"
+            placeholder="Why it is sent back, e.g. a duplicate of the 3 Oct claim"
+            maxLength={200}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            className="mt-2 max-w-md"
+          />
+        </ConfirmRow>
+      );
+    }
     return (
       <ConfirmRow
         key={row.id}
@@ -301,7 +347,7 @@ export function ExpensesView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Expenses"
-        subtitle="Business expenses and spending, Saudara."
+        subtitle="Business expenses and spending."
         actions={
           newButton ? (
             <>
@@ -527,7 +573,10 @@ export function ExpensesView({
                   return (
                     <TableRow key={e.id} className={cn('group/row', e.display_status === 'rejected' && 'opacity-60')}>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(e.expense_date)}</TableCell>
-                      <TableCell className="min-w-24 whitespace-normal break-words font-medium">{e.category_name}</TableCell>
+                      <TableCell className="min-w-24 whitespace-normal break-words font-medium">
+                        {e.category_name}
+                        <AgentNoteMarker note={agentNotes?.[e.id]} />
+                      </TableCell>
                       {/* A long vendor name wraps; it is never cut off behind a tooltip. */}
                       <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">
                         {e.vendor_name}
@@ -551,6 +600,9 @@ export function ExpensesView({
                         </span>
                         {/* Under the chip, and no wider than the column the chip makes: it wraps there and adds no width. */}
                         {payments ? <span className="block w-0 min-w-full whitespace-normal text-xs text-muted-foreground">{payments}</span> : null}
+                        {e.status === 'pending' && e.sent_back_reason ? (
+                          <span className="block w-0 min-w-full whitespace-normal text-xs text-muted-foreground">Sent back: {e.sent_back_reason}</span>
+                        ) : null}
                       </TableCell>
                       {actionsColumn ? (
                         <TableCell className="sticky right-0 border-l bg-card group-hover/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))] group-has-aria-expanded/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))]">

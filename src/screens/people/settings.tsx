@@ -1,11 +1,11 @@
-import { Bell, CalendarClock, Clock, Plane } from 'lucide-react';
+import { CalendarClock, Clock, Plane } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { BentoCard, BentoGrid } from '@/components/bento/bento';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { AttendanceSettingsForm } from '@/components/people/attendance-settings-form';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
+import { WorkspaceCard } from '@/components/settings/workspace-card';
+import { loadWorkspaceOverview } from '@/lib/account/workspace-overview';
 import { loadSettingsModel } from '@/lib/people/documents';
 import { HrOnlyScreen, LOAD_FAILED, loadPeople } from './parts';
 
@@ -24,15 +24,18 @@ export default async function SettingsScreen() {
 
   if (model?.hr_only) return <HrOnlyScreen title="Settings" />;
   const settings = model && !model.hr_only ? model : null;
+  const workspace = await loadWorkspaceOverview();
 
   return (
     <ScreenContainer>
       <PageHeader title="Settings" subtitle="These are the workspace's HR defaults." />
 
       <BentoGrid>
+        <WorkspaceCard overview={workspace} />
+
         <BentoCard
           title="Leave entitlements"
-          subtitle="Default for new balances"
+          subtitle="Default for new balances · changing them is coming soon"
           icon={Plane}
           className="col-span-2 md:col-span-6"
         >
@@ -65,14 +68,14 @@ export default async function SettingsScreen() {
 
         <BentoCard
           title="Overtime rates"
-          subtitle="Pay multiplier by kind of day"
+          subtitle="Pay multiplier by kind of day · changing them is coming soon"
           icon={Clock}
-          className="col-span-2 md:col-span-12"
+          className="col-span-2 md:col-span-6"
         >
           {!settings ? (
             LOAD_FAILED
           ) : (
-            <div className="grid gap-x-8 md:grid-cols-3">
+            <div>
               {settings.overtime.map((rate) => (
                 <ValueRow key={rate.label} label={rate.label}>
                   {rate.value}
@@ -82,30 +85,6 @@ export default async function SettingsScreen() {
           )}
         </BentoCard>
 
-        <BentoCard
-          title="Notifications"
-          subtitle="Keep the team in the loop"
-          icon={Bell}
-          className="col-span-2 md:col-span-12"
-        >
-          {!settings ? (
-            LOAD_FAILED
-          ) : (
-            <div className="grid gap-x-8 md:grid-cols-2">
-              {settings.notifications.map((row) => (
-                <div key={row.key} className="flex items-start justify-between gap-4 py-2">
-                  <div className="space-y-0.5">
-                    <Label htmlFor={`notify-${row.key}`} className="font-medium">
-                      {row.label}
-                    </Label>
-                    <p className="text-sm text-muted-foreground">{row.description}</p>
-                  </div>
-                  <Switch id={`notify-${row.key}`} checked={row.on} disabled />
-                </div>
-              ))}
-            </div>
-          )}
-        </BentoCard>
       </BentoGrid>
     </ScreenContainer>
   );

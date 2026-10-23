@@ -6,6 +6,7 @@ import {
   issueSupplierCreditNote,
   listSupplierCreditNotes,
   openCreditBySupplier,
+  supplierCreditNotesOrNone,
   saveSupplierCreditNote,
   saveSupplierCreditNoteInput,
   unapplySupplierCredit,
@@ -84,6 +85,21 @@ describe('openCreditBySupplier', () => {
         { supplier_id: 'c', status: 'issued', open_amount: 0 },
       ]),
     ).toEqual({ a: 10.3 });
+  });
+});
+
+describe('supplierCreditNotesOrNone', () => {
+  it('gives the notes when the read works, and none (logged) when it fails, so Supplier Bills still loads', async () => {
+    const rows = [{ id: 'n1' }] as never;
+    expect(await supplierCreditNotesOrNone(async () => rows)).toBe(rows);
+    const log = vi.fn();
+    const failure = new Error('permission denied');
+    expect(
+      await supplierCreditNotesOrNone(async () => {
+        throw failure;
+      }, log),
+    ).toEqual([]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('supplier credit notes'), failure);
   });
 });
 

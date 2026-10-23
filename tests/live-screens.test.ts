@@ -12,7 +12,7 @@ describe('live screens', () => {
   });
 
   it('marks a screen that is not connected as sample', () => {
-    expect(isSampleScreen('/crm/plugins')).toBe(true);
+    expect(isSampleScreen('/finance/e-invoice')).toBe(true);
   });
 
   it('leaves connected screens and Tuah alone', () => {
@@ -64,6 +64,10 @@ describe('live screens', () => {
 
   it('counts the Bendahara Accounting Settings as live', () => {
     expect(isSampleScreen('/finance/settings')).toBe(false);
+  });
+
+  it('counts the Bendahara AI Agents screen as live', () => {
+    expect(isSampleScreen('/finance/agents')).toBe(false);
   });
 
   it('counts FX Revaluation as live', () => {
