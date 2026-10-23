@@ -7,6 +7,12 @@
 --     under Utilities reverses RM 100 of Rent on the send-back day and posts RM 80 of
 --     Utilities on the new approval day, and the ledger balances;
 --   * rejecting an approved expense reverses its entry the same way;
+--   * the books lock judges an expense by the day its entry posts: with the books locked
+--     to yesterday, an expense dated a month ago and approved before the lock is sent
+--     back, approved again and rejected, all dated today, and nothing on or before the
+--     lock moves; a first approval dated in the locked period is refused (FIN63). With
+--     the books locked to today, a send-back, a rejection and a second approval of an
+--     old expense are refused (FIN63), and an expense dated after the lock is sent back;
 --   * an expense that has been in the books is not deleted (FIN68), and deleting the
 --     workspace still takes everything with it.
 -- bendahara_cash_book_check.sql and bendahara_expense_rules_check.sql must still pass
@@ -27,6 +33,9 @@ declare
   bank uuid;
   ex uuid;
   ex2 uuid;
+  ex3 uuid; ex4 uuid; ex5 uuid; ex6 uuid; ex7 uuid; ex8 uuid;
+  lk date;
+  was text;
   seen timestamptz;
   my_today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;
   n integer;
@@ -147,6 +156,78 @@ begin
   if n <> 2 then fails := fails || format('a rejected approved expense has %s reversal lines, expected 2', n); end if;
   fails := fails || public.bendahara_send_back_try('an expense that has been in the books is deleted', 'FIN68',
     format('delete from public.finance_expenses where id = %L', ex2));
+
+  -- ==== the books lock: an expense is judged by the day its entry posts ================
+  -- Approved (as the owner saves them) before there is a lock: five dated a month ago
+  -- (their entries are there), one dated tomorrow. A member's claim a month ago, pending.
+  ex3 := public.finance_save_expense(org, jsonb_build_object('expense_date', my_today - 30, 'category_id', rent, 'vendor_name', 'Lock A', 'amount', 7));
+  ex4 := public.finance_save_expense(org, jsonb_build_object('expense_date', my_today - 30, 'category_id', rent, 'vendor_name', 'Lock B', 'amount', 6));
+  ex6 := public.finance_save_expense(org, jsonb_build_object('expense_date', my_today - 30, 'category_id', rent, 'vendor_name', 'Lock C', 'amount', 5));
+  ex8 := public.finance_save_expense(org, jsonb_build_object('expense_date', my_today - 30, 'category_id', rent, 'vendor_name', 'Lock D', 'amount', 4));
+  ex7 := public.finance_save_expense(org, jsonb_build_object('expense_date', my_today + 1, 'category_id', rent, 'vendor_name', 'Lock E', 'amount', 3));
+  reset role;
+  perform set_config('request.jwt.claims', member_claims, true);
+  set local role authenticated;
+  ex5 := public.finance_save_expense(org, jsonb_build_object('expense_date', my_today - 30, 'category_id', rent, 'vendor_name', 'Lock F', 'amount', 2));
+  reset role;
+  perform set_config('request.jwt.claims', owner_claims, true);
+  set local role authenticated;
+
+  -- Locked to yesterday.
+  lk := my_today - 1;
+  insert into public.finance_settings (org_id, lock_date) values (org, lk);
+  select string_agg(format('%s %s %s %s', l.entry_key, l.entry_date, l.debit, l.credit), '; '
+                    order by l.entry_key, l.entry_date, l.debit, l.credit) into was
+    from public.finance_ledger_lines l where l.org_id = org and l.entry_date <= lk;
+
+  select updated_at into seen from public.finance_expenses where id = ex3;
+  fails := fails || public.bendahara_send_back_try('locked to yesterday: an old expense sent back', 'ok',
+    format('select public.finance_send_back_expense(%L, %L, %L, %L)', org, ex3, seen, 'Wrong amount'));
+  select count(*) into n from public.finance_ledger_lines
+   where source_id = ex3 and entry_key = 'expense:' || ex3 || ':reverse' and entry_date = my_today;
+  if n <> 2 then fails := fails || format('locked to yesterday: the send-back has %s reversal lines dated today, expected 2', n); end if;
+  fails := fails || public.bendahara_send_back_try('locked to yesterday: approved again as the owner saves it', 'ok',
+    format('select public.finance_save_expense(%L, %L)', org, jsonb_build_object('id', ex3, 'expense_date', my_today - 30,
+      'category_id', rent, 'vendor_name', 'Lock A', 'amount', 7)));
+  select count(*) into n from public.finance_ledger_lines
+   where source_id = ex3 and entry_key = 'expense:' || ex3 || ':2' and entry_date = my_today;
+  if n <> 2 then fails := fails || format('locked to yesterday: the second approval has %s lines dated today, expected 2', n); end if;
+  fails := fails || public.bendahara_send_back_try('locked to yesterday: an old approved expense rejected', 'ok',
+    format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'rejected', ex4));
+  select count(*) into n from public.finance_ledger_lines
+   where source_id = ex4 and entry_key = 'expense:' || ex4 || ':reverse' and entry_date = my_today;
+  if n <> 2 then fails := fails || format('locked to yesterday: the rejection has %s reversal lines dated today, expected 2', n); end if;
+  select updated_at into seen from public.finance_expenses where id = ex6;
+  fails := fails || public.bendahara_send_back_try('locked to yesterday: another old expense sent back', 'ok',
+    format('select public.finance_send_back_expense(%L, %L, %L, %L)', org, ex6, seen, 'Duplicate'));
+  fails := fails || public.bendahara_send_back_try('locked to yesterday: a first approval in the locked period', 'FIN63',
+    format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'approved', ex5));
+  select string_agg(format('%s %s %s %s', l.entry_key, l.entry_date, l.debit, l.credit), '; '
+                    order by l.entry_key, l.entry_date, l.debit, l.credit) into t
+    from public.finance_ledger_lines l where l.org_id = org and l.entry_date <= lk;
+  if t is distinct from was then
+    fails := fails || format('locked to yesterday: the closed period moved from [%s] to [%s]', was, t);
+  end if;
+
+  -- Locked to today: a reversal or a second approval would be dated today, in the closed period.
+  lk := my_today;
+  update public.finance_settings set lock_date = lk where org_id = org;
+  select updated_at into seen from public.finance_expenses where id = ex8;
+  fails := fails || public.bendahara_send_back_try('locked to today: an old expense sent back', 'FIN63',
+    format('select public.finance_send_back_expense(%L, %L, %L, %L)', org, ex8, seen, 'Wrong'));
+  fails := fails || public.bendahara_send_back_try('locked to today: an old approved expense rejected', 'FIN63',
+    format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'rejected', ex8));
+  select updated_at into seen from public.finance_expenses where id = ex3;
+  fails := fails || public.bendahara_send_back_try('locked to today: a second approval, posted today, sent back', 'FIN63',
+    format('select public.finance_send_back_expense(%L, %L, %L, %L)', org, ex3, seen, 'Wrong'));
+  fails := fails || public.bendahara_send_back_try('locked to today: a sent-back expense approved again', 'FIN63',
+    format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'approved', ex6));
+  select updated_at into seen from public.finance_expenses where id = ex7;
+  fails := fails || public.bendahara_send_back_try('locked to today: an expense dated tomorrow sent back', 'ok',
+    format('select public.finance_send_back_expense(%L, %L, %L, %L)', org, ex7, seen, 'Wrong'));
+  select count(*) into n from public.finance_ledger_lines
+   where source_id = ex7 and entry_key = 'expense:' || ex7 || ':reverse' and entry_date = my_today + 1;
+  if n <> 2 then fails := fails || format('locked to today: the send-back of tomorrow''s expense has %s reversal lines dated tomorrow, expected 2', n); end if;
 
   -- Every entry of the workspace balances.
   select count(*) into n from (

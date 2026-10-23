@@ -660,6 +660,20 @@ it is rejected instead. The audit trail logs "Sent back an expense" (event
 `sent_back`, with the reason) and "Rejected an approved expense".
 `supabase/tests/bendahara_expense_send_back_check.sql` proves it.
 
+The books lock (`private.finance_period_lock`, restated in the same file)
+judges an expense by the day its entry posts, not by its expense date alone.
+Both use one rule, `private.finance_expense_posts_on`. A first approval posts
+on the expense date, so it is refused (`FIN63`) when that date is on or before
+the lock date. A later approval posts on the later of the expense date and the
+Malaysian day it was approved, and a send-back or rejection posts its reversal
+on the later of the approval's day and today in Malaysia; each is refused only
+when that day is on or before the lock date. So with the books locked to
+yesterday, an expense dated last month can still be sent back, rejected or
+approved again: the old entry stays in the closed period and the new lines are
+dated today. With the lock at today, all three are refused. Expense reversals
+use the Malaysian day, while the voids of invoices, credit notes, bills and
+payments are dated by the UTC date of `voided_at`.
+
 An expense's `amount` and `sst_amount` cannot be NaN
 (`finance_expenses_amount_not_nan`, `finance_expenses_sst_amount_not_nan`,
 from `20261114100000_bendahara_expense_amounts.sql`): NaN is a numeric that
