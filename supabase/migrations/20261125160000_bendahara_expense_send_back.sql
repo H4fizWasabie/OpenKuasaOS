@@ -112,7 +112,7 @@ where e.status = 'approved';
 
 -- ---- the expense's guard, restated ------------------------------------------------------
 -- The body of 20261028100000 (its only definition), with three changes, each marked
--- "20261125150000": an expense that has been in the books is not deleted (FIN68); an
+-- "20261125160000": an expense that has been in the books is not deleted (FIN68); an
 -- approved expense goes back to pending when an owner or admin sends it back, as it
 -- stands, with no payment against it and with a reason (FIN69); and the payment check
 -- is shared by that and by rejecting an approved expense.
@@ -128,7 +128,7 @@ begin
     if old.status = 'approved' and exists (select 1 from public.orgs where id = old.org_id) then
       raise exception 'an approved expense cannot be deleted' using errcode = 'FIN01';
     end if;
-    -- 20261125150000: its entries stay in the books, so it stays too. It is rejected instead.
+    -- 20261125160000: its entries stay in the books, so it stays too. It is rejected instead.
     if exists (select 1 from public.orgs where id = old.org_id)
        and exists (select 1 from public.finance_expense_approvals a where a.org_id = old.org_id and a.expense_id = old.id) then
       raise exception 'an expense that has been in the books is kept' using errcode = 'FIN68';
@@ -185,7 +185,7 @@ begin
     return new;
   end if;
 
-  -- 20261125150000: money out, paid or still to be paid, against it.
+  -- 20261125160000: money out, paid or still to be paid, against it.
   has_payments := exists (
     select 1
     from public.finance_allocations a
@@ -194,7 +194,7 @@ begin
       and t.status in ('draft','pending_approval','scheduled','posted')
   );
 
-  -- 20261125150000: sent back. An approved expense goes back to pending as it
+  -- 20261125160000: sent back. An approved expense goes back to pending as it
   -- stands, by an owner or admin, while no payment stands against it, and with a
   -- reason, which finance_send_back_expense passes in the transaction's
   -- openkuasa.expense_send_back_reason. A session with no signed-in user (a
@@ -328,7 +328,7 @@ create trigger finance_expense_approvals_write
 
 -- ---- the books lock, restated ------------------------------------------------------------
 -- private.finance_period_lock, restated from 20261125140000 (its only definition), with
--- one more branch, for finance_expenses (marked 20261125150000), ahead of the general
+-- one more branch, for finance_expenses (marked 20261125160000), ahead of the general
 -- path, as finance_accounts has. A sent-back or rejected expense is reversed today, and
 -- an expense approved again is in the books today, so the lock asks about those days,
 -- not the old expense date. The triggers and their arguments are unchanged.
@@ -343,7 +343,7 @@ create trigger finance_expense_approvals_write
 --   * it is voided while the void's own date is on or before L. The ledger dates a void's reversal on
 --     (voided_at at time zone 'UTC')::date (finance_void_stamp sets voided_at := now()), so that is the date used;
 --     it is never later than the Malaysia date;
---   * an expense (20261125150000) is judged by the day its entry posts, not by its expense date alone. An approved
+--   * an expense (20261125160000) is judged by the day its entry posts, not by its expense date alone. An approved
 --     expense that leaves the books (sent back, or rejected) is reversed on the later of the day its approval posted
 --     and today in Malaysia, so it is refused when that day is on or before L. An expense approved for the first
 --     time posts on its expense date; approved again after a send-back, on the later of its expense date and the
@@ -403,7 +403,7 @@ begin
     return new;
   end if;
 
-  -- 20261125150000: an expense, by the day its entry posts (see above).
+  -- 20261125160000: an expense, by the day its entry posts (see above).
   if tg_table_name = 'finance_expenses' then
     if tg_op = 'INSERT' then
       if new.status is distinct from 'approved' then
@@ -605,7 +605,7 @@ grant select on public.finance_expense_totals to authenticated;
 
 -- ---- the ledger ---------------------------------------------------------------------
 -- finance_ledger_lines, replaced: main's current body as 20261123110000 (supplier
--- credit notes) left it, with only the expense branch changed (marked 20261125150000).
+-- credit notes) left it, with only the expense branch changed (marked 20261125160000).
 -- The same ten columns with the same types, so "create or replace" keeps the view and
 -- everything that reads it (finance_ledger_balances).
 create or replace view public.finance_ledger_lines with (security_invoker = true) as
@@ -901,7 +901,7 @@ from (
   union all
 
   -- ---- expense: each approval, and its reversal once it left the books --------------
-  -- 20261125150000: read from finance_expense_approvals, one row per approval as it was
+  -- 20261125160000: read from finance_expense_approvals, one row per approval as it was
   -- posted, so a reversal undoes what was posted, not what the expense says now. amount
   -- is what is to be paid, SST included, and all of it is the cost. It is owed on Accrued
   -- Expenses, not Accounts Payable; paying it is a payment out against it, above, which
@@ -1120,7 +1120,7 @@ grant select on public.finance_ledger_lines to authenticated;
 
 -- ---- the audit trail ----------------------------------------------------------------
 -- private.finance_expenses_audit, restated from 20261125120000 (its only definition),
--- with two more events (marked 20261125150000): an approved expense sent back, with its
+-- with two more events (marked 20261125160000): an approved expense sent back, with its
 -- reason, and an approved expense rejected. The trigger is unchanged.
 create or replace function private.finance_expenses_audit()
 returns trigger
@@ -1149,7 +1149,7 @@ begin
     r := new; what := 'Approved an expense'; ev := 'approved';
   elsif old.status = 'pending' and new.status = 'rejected' then
     r := new; what := 'Rejected an expense'; ev := 'rejected';
-  -- 20261125150000
+  -- 20261125160000
   elsif old.status = 'approved' and new.status = 'pending' then
     r := new; what := 'Sent back an expense'; ev := 'sent_back';
     why := nullif(btrim(current_setting('openkuasa.expense_send_back_reason', true)), '');

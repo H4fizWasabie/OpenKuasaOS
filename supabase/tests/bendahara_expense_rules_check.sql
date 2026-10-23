@@ -83,7 +83,7 @@ begin
      and not has_function_privilege('service_role', p.oid, 'execute');
   if n <> 1 then fails := array_append(fails, 'finance_expense_stamp is not a caller-run function closed to the API roles'); end if;
   -- Two triggers, in this order: the guard answers before the stamp writes.
-  -- finance_expenses_audit: 20261125120000 (audit trail). finance_expense_approvals_write: 20261125150000 (send back).
+  -- finance_expenses_audit: 20261125120000 (audit trail). finance_expense_approvals_write: 20261125160000 (send back).
   -- finance_period_lock: 20261125140000 (accounting settings, the books lock).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_expenses'::regclass;

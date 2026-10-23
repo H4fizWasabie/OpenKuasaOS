@@ -537,7 +537,7 @@ testWithSupabase('purchases side: bills by category, one payment for two bills, 
   ]);
 
   // A rejected expense produces nothing it did not undo: approved as the owner saved it, then rejected, its entry
-  // is reversed (20261125150000), and a scheduled payment produces nothing.
+  // is reversed (20261125160000), and a scheduled payment produces nothing.
   const refused = await o.c.rpc('finance_save_expense', {
     target_org: o.orgId,
     expense: { expense_date: today(), category_id: o.rent, vendor_name: 'Landlord', amount: 77 },

@@ -150,7 +150,7 @@ begin
    where attrelid = 'public.finance_expense_totals'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'id,org_id,expense_date,category_id,category_name,vendor_id,vendor_name,amount,sst_amount,notes,status,'
        || 'approved_by,approved_at,created_by,created_at,updated_at,paid,held,display_status,method,paid_on,'
-       -- 20261125150000 (expense send back) appends the latest send-back of a pending expense, and in_books.
+       -- 20261125160000 (expense send back) appends the latest send-back of a pending expense, and in_books.
        || 'sent_back_at,sent_back_reason,in_books' then
     fails := fails || format('finance_expense_totals has the columns: %s', t);
   end if;
@@ -383,7 +383,7 @@ begin
     format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'rejected', ex6));
   select status || '/' || coalesce(approved_by::text, 'nobody') into t from public.finance_expenses where id = ex6;
   if t is distinct from 'rejected/' || admin_id then fails := fails || format('an expense rejected by an admin reads %s', t); end if;
-  -- 20261125150000: it was approved, so its entry and the reversal stay in the books, and so does it.
+  -- 20261125160000: it was approved, so its entry and the reversal stay in the books, and so does it.
   fails := fails || public.bendahara_check_try('a rejected expense that was approved is deleted', 'FIN68',
     format('delete from public.finance_expenses where id = %L', ex6));
 
@@ -499,7 +499,7 @@ begin
   select status || '/' || amount || '/' || coalesce(approved_by::text, 'nobody') || '/' || coalesce(approved_at::text, 'never')
     into t from public.finance_expenses where id = ex1;
   if t is distinct from 'pending/110.00/nobody/never' then fails := fails || format('a rejected expense edited reads %s', t); end if;
-  -- Its voided payments still name it, so it stays as a record. 20261125150000: it was approved, so the guard
+  -- Its voided payments still name it, so it stays as a record. 20261125160000: it was approved, so the guard
   -- keeps it first (FIN68), before the voided payments' foreign key (23503) is asked.
   fails := fails || public.bendahara_check_try('an expense with voided payments is deleted', 'FIN68',
     format('delete from public.finance_expenses where id = %L', ex1));
@@ -1073,7 +1073,7 @@ begin
   select (select count(*) from public.finance_expense_totals where org_id = org)
        + (select count(*) from public.finance_payment_vouchers where org_id = org)
        + (select count(*) from public.finance_cash_receipts where org_id = org) into n;
-  -- 18 since 20261125150000: the rejected expense that was approved (ex6) is kept.
+  -- 18 since 20261125160000: the rejected expense that was approved (ex6) is kept.
   if n <> 18 then fails := fails || format('a viewer reads %s rows of the three views, not 18', n); end if;
   fails := fails || public.bendahara_check_try('a viewer saves an expense', '42501',
     format('select public.finance_save_expense(%L, %L)', org, jsonb_build_object('category_id', rent, 'vendor_name', 'X', 'amount', 10)));

@@ -628,7 +628,7 @@ An approved expense is an entry in the books: through the view
 `finance_ledger_lines` it is a debit to its category's ledger account and a
 credit to Accrued Expenses, for the whole amount, SST included. Each approval
 is kept as it was posted in `finance_expense_approvals`
-(`20261125150000_bendahara_expense_send_back.sql`): one row per approval with
+(`20261125160000_bendahara_expense_send_back.sql`): one row per approval with
 its amount, SST, category and the date it is in the books, written only by the
 trigger `finance_expense_approvals_write`; members read it. The first approval
 is in the books on the expense date (key `expense:<id>`), a later one on the

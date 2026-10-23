@@ -1,5 +1,5 @@
 -- Bendahara expense send-back check. Run it after
--- 20261125150000_bendahara_expense_send_back.sql, in the same transaction for a dry
+-- 20261125160000_bendahara_expense_send_back.sql, in the same transaction for a dry
 -- run, or by itself once the migration is applied. It proves that:
 --   * only an owner or admin sends back an approved expense, only with a reason, and
 --     not with a payment against it;
