@@ -164,7 +164,7 @@ describe('what a row offers', () => {
     expect(expenseActions(rejected, false)).toEqual(['edit', 'delete']);
   });
   it('an approved expense: an owner or admin marks it paid while anything is left, and rejects it while no payment stands against it', () => {
-    expect(expenseActions(approved(), true)).toEqual(['pay', 'reject']);
+    expect(expenseActions(approved(), true)).toEqual(['pay', 'sendBack', 'reject']);
     expect(expenseActions(approved(), false)).toEqual([]);
     // All of it is held by a payment still to be paid: nothing is left to pay, and it cannot be rejected.
     expect(expenseActions(approved({ held: 120 }), true)).toEqual([]);
@@ -204,7 +204,7 @@ describe('the questions asked in a row', () => {
   it('asks before approving, in the owner-approved words', () => {
     const parts = expenseQuestion('approve', row());
     expect(text(parts)).toBe(
-      'Approve the expense of RM 120.00 to Kedai Ali, dated 05 Oct 2026? It is then locked: it can be paid, and only rejected while nothing has been paid.',
+      'Approve the expense of RM 120.00 to Kedai Ali, dated 05 Oct 2026? It is then locked: it can be paid, and only sent back or rejected while nothing has been paid.',
     );
     expect(strong(parts)).toEqual(['RM 120.00', 'Kedai Ali']);
   });

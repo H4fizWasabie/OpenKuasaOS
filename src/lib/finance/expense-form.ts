@@ -146,7 +146,7 @@ export function expenseLeft(row: ExpenseRow): number {
   return Math.max(0, Math.round((row.amount - row.paid - row.held) * 100) / 100);
 }
 
-export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete' | 'pay';
+export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'sendBack' | 'delete' | 'pay';
 
 /**
  * What an expense's row menu offers, by its status and by whether the person
@@ -157,9 +157,9 @@ export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete' | 'pay';
  *  - rejected: edited (which sends it for approval again) or deleted;
  *    it is not approved as it stands;
  *  - approved, for an owner or admin: marked paid while anything is left of
- *    it (paying is a sign-off), and rejected while nothing is paid and
- *    nothing is held by a payment, which is its only way back; nobody edits
- *    or deletes it;
+ *    it (paying is a sign-off), and, while nothing is paid and nothing is held
+ *    by a payment, sent back to pending to be corrected, or rejected; nobody
+ *    edits or deletes it;
  *  - approved, for anyone else, and paid in full: nothing.
  */
 export function expenseActions(row: ExpenseRow, canDecide: boolean): ExpenseAction[] {
@@ -168,7 +168,7 @@ export function expenseActions(row: ExpenseRow, canDecide: boolean): ExpenseActi
   if (!canDecide) return [];
   const actions: ExpenseAction[] = [];
   if (expenseLeft(row) > 0) actions.push('pay');
-  if (row.paid === 0 && row.held === 0) actions.push('reject');
+  if (row.paid === 0 && row.held === 0) actions.push('sendBack', 'reject');
   return actions;
 }
 
@@ -232,7 +232,7 @@ export type QuestionPart = { text: string; strong?: boolean };
  * The question asked in an expense's row before it is approved, rejected or deleted, in the words the owner
  * approved. The figures are the row's, as it is now.
  */
-export function expenseQuestion(kind: 'approve' | 'reject' | 'delete', row: ExpenseRow): QuestionPart[] {
+export function expenseQuestion(kind: 'approve' | 'reject' | 'sendBack' | 'delete', row: ExpenseRow): QuestionPart[] {
   const who = (before: string, after: string): QuestionPart[] => [
     { text: before },
     { text: rm(row.amount), strong: true },
@@ -243,13 +243,19 @@ export function expenseQuestion(kind: 'approve' | 'reject' | 'delete', row: Expe
   if (kind === 'approve') {
     return who(
       'Approve the expense of ',
-      `, dated ${displayDate(row.expense_date)}? It is then locked: it can be paid, and only rejected while nothing has been paid.`,
+      `, dated ${displayDate(row.expense_date)}? It is then locked: it can be paid, and only sent back or rejected while nothing has been paid.`,
     );
   }
   if (kind === 'reject') {
     return who(
       row.status === 'approved' ? 'Reject this approved expense of ' : 'Reject the expense of ',
       '? It stays in the list as Rejected. Whoever entered it can edit it and send it again, or delete it.',
+    );
+  }
+  if (kind === 'sendBack') {
+    return who(
+      'Send back the approved expense of ',
+      '? It goes back to Pending to be corrected, and its entry in the books is reversed today. Approved again, it is a new entry.',
     );
   }
   return who('Delete the expense of ', '? This cannot be undone.');
