@@ -33,6 +33,10 @@
 --     send-back, while the expense is pending), at the end.
 --   * finance_ledger_lines: only the expense branch changes. It reads the approvals.
 --   * The audit trail logs a send-back and the rejection of an approved expense.
+--   * The books lock judges an expense by the day its entry posts (one rule,
+--     private.finance_expense_posts_on, shared with the approvals' writer): a
+--     reversal or a later approval dated today is not refused for an old expense
+--     date, and is refused when today is in the closed period.
 --
 -- Error codes: FIN68 and FIN69 are new (the highest before this file is FIN67).
 --   FIN68  an expense that has been in the books is kept
@@ -240,6 +244,26 @@ begin
   return new;
 end $$;
 
+-- ---- the day an approval is in the books ---------------------------------------------------
+-- One rule, read by the approvals' writer below and by the books lock: the first
+-- approval of an expense (it has no approval yet) is in the books on its expense date,
+-- as before; a later one on the Malaysian day it was approved, or the expense date if
+-- that is later. Asked before the new approval is written, so "no approval yet" means
+-- this is the first. Its callers run as the owner, so it needs no rights of its own.
+create function private.finance_expense_posts_on(p_org uuid, p_expense uuid, p_expense_date date, p_approved_at timestamptz)
+returns date
+language sql
+stable
+set search_path = ''
+as $$
+  select case
+    when not exists (select 1 from public.finance_expense_approvals a where a.org_id = p_org and a.expense_id = p_expense)
+      then p_expense_date
+    else greatest(p_expense_date, (p_approved_at at time zone 'Asia/Kuala_Lumpur')::date)
+  end
+$$;
+revoke all on function private.finance_expense_posts_on(uuid, uuid, date, timestamptz) from public, anon, authenticated, service_role;
+
 -- ---- the approvals' writer --------------------------------------------------------------
 -- After the guard has let the change through. Into approved: a new approval, as the
 -- expense stands. Out of approved (sent back, or rejected): the approval in the books
@@ -274,8 +298,7 @@ begin
     values (
       new.org_id, new.id, coalesce(last_round, 0) + 1, new.amount, new.sst_amount, new.category_id,
       -- The first approval on the expense date, as before; a later one on the day it was approved.
-      case when last_round is null then new.expense_date
-           else greatest(new.expense_date, (new.approved_at at time zone 'Asia/Kuala_Lumpur')::date) end,
+      private.finance_expense_posts_on(new.org_id, new.id, new.expense_date, new.approved_at),
       new.approved_by, new.approved_at
     );
   end if;
@@ -285,6 +308,177 @@ revoke all on function private.finance_expense_approvals_write() from public, an
 create trigger finance_expense_approvals_write
   after update of status on public.finance_expenses
   for each row execute function private.finance_expense_approvals_write();
+
+-- ---- the books lock, restated ------------------------------------------------------------
+-- private.finance_period_lock, restated from 20261125140000 (its only definition), with
+-- one more branch, for finance_expenses (marked 20261125150000), ahead of the general
+-- path, as finance_accounts has. A sent-back or rejected expense is reversed today, and
+-- an expense approved again is in the books today, so the lock asks about those days,
+-- not the old expense date. The triggers and their arguments are unchanged.
+-- tg_argv[0]: the row's date column. tg_argv[1]: its ledger statuses, comma-separated, or '*' (every row is one).
+-- On finance_accounts (no arguments): the opening balance, its date and its rate. Runs as the owner so the lock is
+-- read whoever writes; it reads only the row's own workspace's settings. The status tests come first, so a draft
+-- never costs a lookup.
+--
+-- A ledger row is refused (FIN63) when, with L the lock date:
+--   * it is written in a ledger status, or moved into one, dated on or before L (and a row that was already in a
+--     ledger status, by its old date too);
+--   * it is voided while the void's own date is on or before L. The ledger dates a void's reversal on
+--     (voided_at at time zone 'UTC')::date (finance_void_stamp sets voided_at := now()), so that is the date used;
+--     it is never later than the Malaysia date;
+--   * an expense (20261125150000) is judged by the day its entry posts, not by its expense date alone. An approved
+--     expense that leaves the books (sent back, or rejected) is reversed on the later of the day its approval posted
+--     and today in Malaysia, so it is refused when that day is on or before L. An expense approved for the first
+--     time posts on its expense date; approved again after a send-back, on the later of its expense date and the
+--     Malaysian day it was approved (private.finance_expense_posts_on); it is refused when that day is on or before L;
+--   * its date changes while its status stays a ledger status, when either date is on or before L (the documents'
+--     own guards refuse this today; this is defence in depth).
+-- The status read is NEW's as it stands when this trigger fires. BEFORE triggers fire in name order, so a guard
+-- that sets new.status must sort before 'finance_period_lock' for its status to be the one checked here.
+create or replace function private.finance_period_lock()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  l date;
+  n jsonb;
+  o jsonb;
+  d date;
+  od date;
+  st text;
+  ost text;
+  ledger text[];
+  is_ledger boolean;
+  was_ledger boolean := false;
+begin
+  if tg_table_name = 'finance_accounts' then
+    if tg_op = 'DELETE' then
+      -- A workspace being deleted takes its accounts with it: its row is already gone.
+      if old.opening_balance = 0 or not exists (select 1 from public.orgs o2 where o2.id = old.org_id) then
+        return old;
+      end if;
+      select s.lock_date into l from public.finance_settings s where s.org_id = old.org_id;
+      if l is not null and old.opening_date <= l then
+        raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
+          using errcode = 'FIN63';
+      end if;
+      return old;
+    end if;
+    if tg_op = 'UPDATE' and new.opening_balance is not distinct from old.opening_balance
+       and new.opening_date is not distinct from old.opening_date
+       and new.opening_rate is not distinct from old.opening_rate then
+      return new;
+    end if;
+    if new.opening_balance = 0 and (tg_op = 'INSERT' or old.opening_balance = 0) then
+      return new;
+    end if;
+    select s.lock_date into l from public.finance_settings s where s.org_id = new.org_id;
+    if l is null then
+      return new;
+    end if;
+    if (new.opening_balance <> 0 and new.opening_date <= l)
+       or (tg_op = 'UPDATE' and old.opening_balance <> 0 and old.opening_date <= l) then
+      raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
+        using errcode = 'FIN63';
+    end if;
+    return new;
+  end if;
+
+  -- 20261125150000: an expense, by the day its entry posts (see above).
+  if tg_table_name = 'finance_expenses' then
+    if tg_op = 'INSERT' then
+      if new.status is distinct from 'approved' then
+        return new;
+      end if;
+    elsif new.status is not distinct from old.status then
+      -- Status unchanged: only an approved expense whose date moves.
+      if new.status is distinct from 'approved' or new.expense_date is not distinct from old.expense_date then
+        return new;
+      end if;
+    elsif new.status is distinct from 'approved' and old.status is distinct from 'approved' then
+      -- Pending to rejected and back: no ledger effect.
+      return new;
+    end if;
+    select s.lock_date into l from public.finance_settings s where s.org_id = new.org_id;
+    if l is null then
+      return new;
+    end if;
+    if tg_op = 'UPDATE' and new.status is not distinct from old.status then
+      -- An approved expense's date changed (its guard refuses this today; this is defence in depth).
+      if new.expense_date <= l or old.expense_date <= l then
+        raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
+          using errcode = 'FIN63';
+      end if;
+      return new;
+    end if;
+    if tg_op = 'UPDATE' and old.status = 'approved' then
+      -- Leaving the books: the reversal posts on the later of the approval's day and today in Malaysia.
+      select a.posted_on into od from public.finance_expense_approvals a
+       where a.org_id = old.org_id and a.expense_id = old.id and a.reversed_at is null;
+      if greatest(coalesce(od, old.expense_date), (now() at time zone 'Asia/Kuala_Lumpur')::date) <= l then
+        raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
+          using errcode = 'FIN63';
+      end if;
+    end if;
+    if new.status = 'approved' then
+      -- Into the books: the guard (it sorts first) has set approved_at; today if it has not.
+      if private.finance_expense_posts_on(new.org_id, new.id, new.expense_date, coalesce(new.approved_at, now())) <= l then
+        raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
+          using errcode = 'FIN63';
+      end if;
+    end if;
+    return new;
+  end if;
+
+  n := to_jsonb(new);
+  d := (n ->> tg_argv[0])::date;
+  if tg_op = 'UPDATE' then
+    o := to_jsonb(old);
+    od := (o ->> tg_argv[0])::date;
+  end if;
+
+  if tg_argv[1] = '*' then
+    if tg_op = 'UPDATE' and d is not distinct from od then
+      return new;
+    end if;
+  else
+    ledger := string_to_array(tg_argv[1], ',');
+    st := n ->> 'status';
+    is_ledger := coalesce(st = any (ledger), false);
+    if tg_op = 'UPDATE' then
+      ost := o ->> 'status';
+      was_ledger := coalesce(ost = any (ledger), false);
+    end if;
+    if tg_op = 'INSERT' then
+      if not is_ledger then
+        return new;
+      end if;
+    elsif st is not distinct from ost then
+      -- Status unchanged: only a ledger row whose date moves.
+      if not is_ledger or d is not distinct from od then
+        return new;
+      end if;
+    elsif not is_ledger and not (was_ledger and st is distinct from 'void') then
+      -- Draft to draft-like statuses (pending approval, scheduled, rejected...): no ledger effect.
+      return new;
+    end if;
+  end if;
+
+  select s.lock_date into l from public.finance_settings s where s.org_id = new.org_id;
+  if l is null then
+    return new;
+  end if;
+  if (is_ledger is not false and d <= l)
+     or (was_ledger and od <= l)
+     or (st = 'void' and (now() at time zone 'UTC')::date <= l) then
+    raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
+      using errcode = 'FIN63';
+  end if;
+  return new;
+end $$;
+revoke all on function private.finance_period_lock() from public, anon, authenticated, service_role;
 
 -- ---- send back ----------------------------------------------------------------------
 -- Sends an approved expense back to pending, as the person was shown it
