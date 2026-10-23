@@ -324,7 +324,7 @@ export function SupplierCreditNotesView({
   };
 
   const tableError = confirm.error && asking && !askingInView ? confirm.error : null;
-  const subtitle = 'Credit your suppliers give you against their bills, Saudara.';
+  const subtitle = 'Credit your suppliers give you against their bills.';
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
