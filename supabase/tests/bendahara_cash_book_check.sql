@@ -150,8 +150,8 @@ begin
    where attrelid = 'public.finance_expense_totals'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'id,org_id,expense_date,category_id,category_name,vendor_id,vendor_name,amount,sst_amount,notes,status,'
        || 'approved_by,approved_at,created_by,created_at,updated_at,paid,held,display_status,method,paid_on,'
-       -- 20261125150000 (expense send back) appends the latest send-back of a pending expense.
-       || 'sent_back_at,sent_back_reason' then
+       -- 20261125150000 (expense send back) appends the latest send-back of a pending expense, and in_books.
+       || 'sent_back_at,sent_back_reason,in_books' then
     fails := fails || format('finance_expense_totals has the columns: %s', t);
   end if;
   foreach t in array array[

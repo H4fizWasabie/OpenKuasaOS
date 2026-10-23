@@ -152,7 +152,8 @@ export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'sendBack' | 'delete
  * What an expense's row menu offers, by its status and by whether the person
  * may decide (an owner or admin). The database's rules, so nothing is offered
  * that it would refuse:
- *  - pending: anyone who may write edits or deletes it, whoever entered it;
+ *  - pending: anyone who may write edits or deletes it, whoever entered it,
+ *    unless it has been in the books (approved once), which is never deleted;
  *    an owner or admin also approves or rejects it;
  *  - rejected: edited (which sends it for approval again) or deleted;
  *    it is not approved as it stands;
@@ -163,8 +164,10 @@ export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'sendBack' | 'delete
  *  - approved, for anyone else, and paid in full: nothing.
  */
 export function expenseActions(row: ExpenseRow, canDecide: boolean): ExpenseAction[] {
-  if (row.status === 'pending') return canDecide ? ['edit', 'approve', 'reject', 'delete'] : ['edit', 'delete'];
-  if (row.status === 'rejected') return ['edit', 'delete'];
+  // An expense that has been in the books is kept (FIN68): it is never offered for deleting.
+  const remove: ExpenseAction[] = row.in_books ? [] : ['delete'];
+  if (row.status === 'pending') return canDecide ? ['edit', 'approve', 'reject', ...remove] : ['edit', ...remove];
+  if (row.status === 'rejected') return ['edit', ...remove];
   if (!canDecide) return [];
   const actions: ExpenseAction[] = [];
   if (expenseLeft(row) > 0) actions.push('pay');
@@ -247,9 +250,17 @@ export function expenseQuestion(kind: 'approve' | 'reject' | 'sendBack' | 'delet
     );
   }
   if (kind === 'reject') {
+    if (row.status === 'approved') {
+      return who(
+        'Reject this approved expense of ',
+        '? Its entry in the books is reversed today. It stays in the list as Rejected, and whoever entered it can edit it and send it again.',
+      );
+    }
     return who(
-      row.status === 'approved' ? 'Reject this approved expense of ' : 'Reject the expense of ',
-      '? It stays in the list as Rejected. Whoever entered it can edit it and send it again, or delete it.',
+      'Reject the expense of ',
+      row.in_books
+        ? '? It stays in the list as Rejected. Whoever entered it can edit it and send it again.'
+        : '? It stays in the list as Rejected. Whoever entered it can edit it and send it again, or delete it.',
     );
   }
   if (kind === 'sendBack') {

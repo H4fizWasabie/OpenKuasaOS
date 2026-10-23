@@ -388,7 +388,7 @@ describe('deleteExpense', () => {
     });
     expect(await deleteExpense(refused('FIN68'), { id: EXPENSE })).toEqual({
       ok: false,
-      error: 'This expense has been in the books, so it is kept. An owner or admin can reject it instead.',
+      error: 'This expense has been in the books, so it is kept and cannot be deleted.',
     });
     expect(await deleteExpense(refused('42501'), { id: EXPENSE })).toEqual({ ok: false, error: 'You do not have permission to make changes here.' });
     expect(await deleteExpense(fakeFinance({ data: null, error: null }).ctx, { id: EXPENSE })).toEqual({ ok: false, error: 'That expense no longer exists.' });

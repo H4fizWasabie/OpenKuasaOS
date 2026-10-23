@@ -69,6 +69,8 @@ export type ExpenseRow = {
   /** While pending because an owner or admin sent it back: when, and why. Absent from sample data. */
   sent_back_at?: string | null;
   sent_back_reason?: string | null;
+  /** Approved at least once, so it has entries in the books and is never deleted (FIN68). Absent from sample data. */
+  in_books?: boolean;
 };
 
 export const EXPENSE_MESSAGES = {
@@ -115,7 +117,7 @@ export const EXPENSE_MESSAGES = {
   // 23503 from deleting: a payment that was voided still names the expense, and a voided payment is kept.
   keptForPayment: 'This expense has a voided payment against it, so it is kept.',
   // FIN68 from deleting: it was approved once, so its entries, and it, stay in the books.
-  inBooks: 'This expense has been in the books, so it is kept. An owner or admin can reject it instead.',
+  inBooks: 'This expense has been in the books, so it is kept and cannot be deleted.',
   // Sending back: the reason box.
   reason: 'Say why the expense is sent back.',
   // FIN02 from sending back.
@@ -257,7 +259,7 @@ function expenseWriteFailed(fnName: string, error: unknown, refusals: Record<str
 
 const EXPENSE_COLUMNS =
   'id,expense_date,category_id,category_name,vendor_id,vendor_name,amount,sst_amount,notes,status,display_status,' +
-  'paid,held,method,paid_on,updated_at,sent_back_at,sent_back_reason';
+  'paid,held,method,paid_on,updated_at,sent_back_at,sent_back_reason,in_books';
 
 /** Every expense in the workspace, newest first, read a page at a time. */
 export async function listExpenses(ctx: FinanceWriteContext): Promise<ExpenseRow[]> {

@@ -15,7 +15,8 @@
 --     approved again any number of times, with a different amount or category each
 --     time: each row undoes exactly what it posted.
 --   * Every expense approved today becomes one row, dated its expense date, so the
---     ledger is the same, row for row, when this file has run (checked at the end).
+--     ledger's expense lines are the same, row for row, when this file has run
+--     (checked at the end).
 --   * Dates: the first approval is in the books on the expense date, as today. A
 --     later one is in the books on the day it was approved (or the expense date, if
 --     that is later), so a correction is never written into a past month. A
@@ -30,7 +31,8 @@
 --   * An expense that has ever been in the books is no longer deleted (FIN68): its
 --     entries stay, so it does too. It is rejected instead.
 --   * finance_expense_totals gains sent_back_at and sent_back_reason (the latest
---     send-back, while the expense is pending), at the end.
+--     send-back, while the expense is pending and has not been rejected since) and
+--     in_books (approved at least once), at the end.
 --   * finance_ledger_lines: only the expense branch changes. It reads the approvals.
 --   * The audit trail logs a send-back and the rejection of an approved expense.
 --   * The books lock judges an expense by the day its entry posts (one rule,
@@ -45,9 +47,14 @@
 -- Fail fast instead of queueing behind a long transaction and stalling sign-ins.
 set local lock_timeout = '5s';
 
--- The books as they are, to check at the end that nothing that was there moved.
-create temp table exp308_ledger_before on commit drop as select * from public.finance_ledger_lines;
-create temp table exp308_balances_before on commit drop as select * from public.finance_ledger_balances;
+-- No expense changes while this file runs: the snapshot below and the check at the end
+-- see the same expenses. Readers go on; writers to finance_expenses wait (lock_timeout).
+lock table public.finance_expenses in share row exclusive mode;
+
+-- The expense lines of the books as they are, to check at the end that none moved. Only
+-- the expense branch of the ledger changes, so the other branches are not read twice.
+create temp table exp308_ledger_before on commit drop as
+  select * from public.finance_ledger_lines where source = 'expense';
 
 -- ---- approvals ----------------------------------------------------------------------
 create table public.finance_expense_approvals (
@@ -69,6 +76,9 @@ create table public.finance_expense_approvals (
   reversed_by uuid references auth.users(id) on delete set null,
   reversed_as text check (reversed_as in ('sent_back', 'rejected')),
   reason text check (char_length(reason) <= 200),
+  -- A send-back's reason stops being the expense's open question when the expense,
+  -- pending again, is then rejected: from that moment it is not shown on the row.
+  reason_closed_at timestamptz,
   unique (org_id, expense_id, round_no),
   constraint finance_expense_approvals_reversed_check
     check (num_nulls(reversed_on, reversed_at, reversed_as) in (0, 3)),
@@ -287,6 +297,13 @@ begin
            reason = case when new.status = 'pending'
                          then nullif(btrim(current_setting('openkuasa.expense_send_back_reason', true)), '') end
      where a.org_id = new.org_id and a.expense_id = new.id and a.reversed_at is null;
+  end if;
+
+  -- A sent-back expense rejected while pending: its send-back reason is closed.
+  if old.status = 'pending' and new.status = 'rejected' then
+    update public.finance_expense_approvals a
+       set reason_closed_at = now()
+     where a.org_id = new.org_id and a.expense_id = new.id and a.reversed_as = 'sent_back' and a.reason_closed_at is null;
   end if;
 
   if new.status = 'approved' and old.status <> 'approved' then
@@ -511,8 +528,10 @@ revoke all on function public.finance_send_back_expense(uuid, uuid, timestamptz,
 grant execute on function public.finance_send_back_expense(uuid, uuid, timestamptz, text) to authenticated;
 
 -- ---- finance_expense_totals ---------------------------------------------------------
--- The body of 20261028100000 (its only definition), with two columns at the end: when
--- a pending expense was last sent back, and why. Both null for any other expense.
+-- The body of 20261028100000 (its only definition), with three columns at the end: when
+-- a pending expense was last sent back, and why (both null for any other expense, and
+-- once it has been rejected since), and in_books: it has been approved at least once,
+-- so it has entries in the books and is never deleted (FIN68).
 create or replace view public.finance_expense_totals with (security_invoker = true) as
 select
   e.id,
@@ -541,7 +560,8 @@ select
   last.method,
   last.txn_date as paid_on,
   sb.reversed_at as sent_back_at,
-  sb.reason as sent_back_reason
+  sb.reason as sent_back_reason,
+  exists (select 1 from public.finance_expense_approvals ia where ia.org_id = e.org_id and ia.expense_id = e.id) as in_books
 from public.finance_expenses e
 join public.finance_categories cat on cat.org_id = e.org_id and cat.id = e.category_id
 left join public.finance_contacts c on c.org_id = e.org_id and c.id = e.vendor_id
@@ -571,13 +591,13 @@ left join lateral (
   -- The latest approval, if the expense is pending because it was sent back.
   select l.reversed_at, l.reason
   from (
-    select a.reversed_at, a.reason, a.reversed_as
+    select a.reversed_at, a.reason, a.reversed_as, a.reason_closed_at
     from public.finance_expense_approvals a
     where e.status = 'pending' and a.org_id = e.org_id and a.expense_id = e.id
     order by a.round_no desc
     limit 1
   ) l
-  where l.reversed_as = 'sent_back'
+  where l.reversed_as = 'sent_back' and l.reason_closed_at is null
 ) sb on true;
 -- "create or replace" keeps the grants; said again as 20261028100000 has them.
 revoke all on public.finance_expense_totals from anon, authenticated;
@@ -1155,22 +1175,15 @@ declare
   n bigint;
   names text;
 begin
-  -- Nothing that was in the books moved, every workspace, row for row, both ways.
+  -- No expense line that was in the books moved, every workspace, row for row, both ways.
+  -- (The other branches of the view are its text as 20261123110000 left it.)
   select count(*) into n from (
-    (select * from public.finance_ledger_lines except all select * from exp308_ledger_before)
+    (select * from public.finance_ledger_lines where source = 'expense' except all select * from exp308_ledger_before)
     union all
-    (select * from exp308_ledger_before except all select * from public.finance_ledger_lines)
+    (select * from exp308_ledger_before except all select * from public.finance_ledger_lines where source = 'expense')
   ) d;
   if n <> 0 then
-    raise exception '% ledger lines changed', n;
-  end if;
-  select count(*) into n from (
-    (select * from public.finance_ledger_balances except all select * from exp308_balances_before)
-    union all
-    (select * from exp308_balances_before except all select * from public.finance_ledger_balances)
-  ) d;
-  if n <> 0 then
-    raise exception '% ledger balances changed', n;
+    raise exception '% expense ledger lines changed', n;
   end if;
 
   -- Every approved expense has exactly one approval in the books, and nothing else has one.

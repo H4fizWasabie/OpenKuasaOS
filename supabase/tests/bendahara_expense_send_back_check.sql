@@ -228,6 +228,21 @@ begin
   select count(*) into n from public.finance_ledger_lines
    where source_id = ex7 and entry_key = 'expense:' || ex7 || ':reverse' and entry_date = my_today + 1;
   if n <> 2 then fails := fails || format('locked to today: the send-back of tomorrow''s expense has %s reversal lines dated tomorrow, expected 2', n); end if;
+  -- Pending to rejected and back has no entry, so the lock lets it through, for an old
+  -- expense too. A sent-back expense rejected while pending no longer shows its reason,
+  -- not even once it is edited back to pending.
+  select sent_back_reason into t from public.finance_expense_totals where id = ex6;
+  if t is distinct from 'Duplicate' then fails := fails || format('a sent-back expense gives the reason %s, expected Duplicate', t); end if;
+  fails := fails || public.bendahara_send_back_try('locked to today: a sent-back expense rejected', 'ok',
+    format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'rejected', ex6));
+  fails := fails || public.bendahara_send_back_try('locked to today: a rejected expense edited back to pending', 'ok',
+    format('update public.finance_expenses set status = %L, notes = %L, updated_at = now() where id = %L', 'pending', 'Fixed', ex6));
+  select count(*) into n from public.finance_expense_totals where id = ex6 and status = 'pending' and sent_back_reason is null and in_books;
+  if n <> 1 then fails := array_append(fails, 'a sent-back expense rejected and edited back shows its old reason, or is not in_books'); end if;
+  fails := fails || public.bendahara_send_back_try('locked to today: a pending claim in the closed period rejected', 'ok',
+    format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'rejected', ex5));
+  select count(*) into n from public.finance_expense_totals where id = ex5 and not in_books;
+  if n <> 1 then fails := array_append(fails, 'a claim never approved reads as in_books'); end if;
 
   -- Every entry of the workspace balances.
   select count(*) into n from (

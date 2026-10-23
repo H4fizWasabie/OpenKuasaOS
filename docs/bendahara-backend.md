@@ -642,7 +642,9 @@ An owner or admin sends back an approved expense that no payment stands against
 reason)`): it returns to pending, is corrected, and is approved again as any
 pending expense is. The reason is required (`FIN69`, also for a plain update of
 status), at most 200 characters, and shown on the pending row
-(`finance_expense_totals.sent_back_at` and `sent_back_reason`). A payment
+(`finance_expense_totals.sent_back_at` and `sent_back_reason`) until the
+expense is approved again or rejected (`finance_expense_approvals.reason_closed_at`):
+edited back to pending after a rejection, it no longer shows the old reason. A payment
 against it, paid or still to be paid, refuses it (`FIN02`); anyone else is
 `FIN14`. When no approved expense with that `updated_at` is found the function
 answers null, and the app reads whether it is gone, pending again or rejected.
@@ -656,7 +658,8 @@ approved again at RM 80 under Utilities reverses RM 100 of Rent on the
 send-back day and posts RM 80 of Utilities on the new approval day. Before
 this file, rejecting an approved expense took its entry out of the books with
 no reversal. An expense that has been in the books is never deleted (`FIN68`):
-it is rejected instead. The audit trail logs "Sent back an expense" (event
+it is rejected instead. `finance_expense_totals.in_books` says which expenses
+those are, and the Expenses screen offers Delete only on the others. The audit trail logs "Sent back an expense" (event
 `sent_back`, with the reason) and "Rejected an approved expense".
 `supabase/tests/bendahara_expense_send_back_check.sql` proves it.
 
@@ -670,7 +673,16 @@ on the later of the approval's day and today in Malaysia; each is refused only
 when that day is on or before the lock date. So with the books locked to
 yesterday, an expense dated last month can still be sent back, rejected or
 approved again: the old entry stays in the closed period and the new lines are
-dated today. With the lock at today, all three are refused. Expense reversals
+dated today. With the lock at today, all three are refused. Moving an expense
+between pending and rejected has no entry, so the lock never refuses it.
+
+Two things read live, not as posted. The description of an expense's lines
+("Expense to <vendor>") takes the vendor's name as the expense has it now, so
+correcting the vendor of a sent-back expense renames the earlier approval's
+lines too; their amounts, category and dates do not change. And the Expenses
+screen's charts group expenses by `expense_date`, while an expense approved
+again after a send-back is in the books on its approval day: in a month's
+total the two can differ for an expense corrected in a later month. Expense reversals
 use the Malaysian day, while every void (invoices, credit notes, supplier bills
 and credit notes, payments, transfers, contras) is dated by the UTC date of
 `voided_at`.

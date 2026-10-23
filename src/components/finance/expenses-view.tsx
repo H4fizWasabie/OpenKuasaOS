@@ -298,6 +298,7 @@ export function ExpensesView({
           confirmLabel="Send back"
           pendingLabel="Sending back…"
           pending={confirm.pending}
+          disabled={reason.trim() === ''}
           error={confirm.error}
           onConfirm={() =>
             confirm.run(async () => {
