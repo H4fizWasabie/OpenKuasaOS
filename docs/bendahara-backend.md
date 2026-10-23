@@ -671,8 +671,9 @@ when that day is on or before the lock date. So with the books locked to
 yesterday, an expense dated last month can still be sent back, rejected or
 approved again: the old entry stays in the closed period and the new lines are
 dated today. With the lock at today, all three are refused. Expense reversals
-use the Malaysian day, while the voids of invoices, credit notes, bills and
-payments are dated by the UTC date of `voided_at`.
+use the Malaysian day, while every void (invoices, credit notes, supplier bills
+and credit notes, payments, transfers, contras) is dated by the UTC date of
+`voided_at`.
 
 An expense's `amount` and `sst_amount` cannot be NaN
 (`finance_expenses_amount_not_nan`, `finance_expenses_sst_amount_not_nan`,
