@@ -399,14 +399,16 @@ const PURCHASE_PATHS = [
   '/finance/payment-vouchers',
   // Banking lists every movement of money and the balance of the account it left.
   '/finance/banking',
+  // Supplier Credit Notes offers the bills credit can go on, with what each still owes.
+  '/finance/supplier-credit-notes',
   ...LEDGER_PATHS,
 ];
 // A bill saved, posted, voided or deleted changes the billed total of the purchase order it is raised against
 // (drafts count), so Purchase Orders refreshes with the purchase screens. A payment does not, so it keeps PURCHASE_PATHS.
 // Receipts Inbox names the bill a receipt is tied to: posting gives a draft its number, and deleting a draft sends
 // its receipt back to Unmatched. KEEP IN STEP with RECEIPT_BILL_PATHS in src/lib/finance/receipt-match.ts.
-// Supplier Credit Notes offers the posted bills a credit note can go against, and the bills credit can go on.
-const BILL_PATHS = [...PURCHASE_PATHS, '/finance/purchase-orders', '/finance/receipts-inbox', '/finance/supplier-credit-notes'];
+// Supplier Credit Notes (in PURCHASE_PATHS) also offers the posted bills a credit note can go against.
+const BILL_PATHS = [...PURCHASE_PATHS, '/finance/purchase-orders', '/finance/receipts-inbox'];
 // A supplier credit note that is issued or voided, and credit applied or taken off, change what a bill owes (Supplier
 // Bills, the payment forms, Payable), an order's billed total, and, for issue and void, the books: BILL_PATHS covers
 // all of them, Supplier Credit Notes included. A draft moves nothing but its own list.
@@ -1250,8 +1252,8 @@ const CONTRA_SIGN_OFF = { signOff: true, signOffError: CONTRA_MESSAGES.needsSign
 const CONTRA_DRAFT_PATHS = ['/finance/contra-entries'];
 // Posting or voiding one changes what its invoices and bills owe, as a payment would, with no money moving. That
 // shows on Invoices and Supplier Bills (Balance, status, Set off), in every form that offers an invoice or a bill
-// for what it still owes (Payments In, Cash Receipts, Credit Notes, Refunds, Payments Out, Payment Vouchers), on
-// Customers & Suppliers (Receivable and Payable) and in the books (LEDGER_PATHS: one entry on Accounts Receivable
+// for what it still owes (Payments In, Cash Receipts, Credit Notes, Refunds, Payments Out, Payment Vouchers,
+// Supplier Credit Notes), on Customers & Suppliers (Receivable and Payable) and in the books (LEDGER_PATHS: one entry on Accounts Receivable
 // and Accounts Payable, and its reversal when voided). Banking is not here: no bank or cash account moves.
 const CONTRA_PATHS = [
   '/finance/contra-entries',
@@ -1261,6 +1263,7 @@ const CONTRA_PATHS = [
   '/finance/credit-notes',
   '/finance/refunds',
   '/finance/supplier-bills',
+  '/finance/supplier-credit-notes',
   '/finance/payments-out',
   '/finance/payment-vouchers',
   '/finance/customers-suppliers',

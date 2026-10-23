@@ -68,12 +68,14 @@ const actions = await import('@/app/(app)/finance/actions');
 const PATHS = [
   '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
   '/finance/banking',
+  // Supplier Credit Notes offers the bills credit can go on, with what each still owes: a payment changes that.
+  '/finance/supplier-credit-notes',
   // Every document that posts, voids or pays also moves the books.
   '/finance/chart-of-accounts', '/finance/journals', '/finance/reports',
 ];
 // A bill saved, posted, voided or deleted also changes the billed total of the purchase order it is raised against,
-// and what Receipts Inbox says of a receipt tied to it. Supplier Credit Notes offers the posted bills.
-const BILL_PATHS = [...PATHS, '/finance/purchase-orders', '/finance/receipts-inbox', '/finance/supplier-credit-notes'];
+// and what Receipts Inbox says of a receipt tied to it.
+const BILL_PATHS = [...PATHS, '/finance/purchase-orders', '/finance/receipts-inbox'];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
 const bill = {

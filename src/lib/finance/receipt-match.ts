@@ -111,12 +111,12 @@ export const RECEIPT_BILL_PATHS = [
   '/finance/customers-suppliers',
   '/finance/payment-vouchers',
   '/finance/banking',
+  '/finance/supplier-credit-notes',
   '/finance/chart-of-accounts',
   '/finance/journals',
   '/finance/reports',
   '/finance/purchase-orders',
   '/finance/receipts-inbox',
-  '/finance/supplier-credit-notes',
 ];
 /** Tying and untying change the inbox and the paperclip on the two document screens, and no figure anywhere. */
 export const RECEIPT_TIE_PATHS = ['/finance/receipts-inbox', '/finance/expenses', '/finance/supplier-bills'];
