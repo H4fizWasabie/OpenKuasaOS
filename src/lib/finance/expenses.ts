@@ -13,7 +13,7 @@
  * corrected and approved again. Each approval is kept, as posted, in
  * `finance_expense_approvals`, and leaves the books by a reversal on the day it
  * was sent back or rejected; an expense that has been in the books is never
- * deleted (FIN63). It is paid by a payment voucher. org_id comes from the context.
+ * deleted (FIN68). It is paid by a payment voucher. org_id comes from the context.
  */
 import { z } from 'zod';
 import { LINE_MESSAGES, isoDate, optionalText, ringgitAmount } from './document-lines';
@@ -114,7 +114,7 @@ export const EXPENSE_MESSAGES = {
   missing: 'The category or the vendor on this expense no longer exists.',
   // 23503 from deleting: a payment that was voided still names the expense, and a voided payment is kept.
   keptForPayment: 'This expense has a voided payment against it, so it is kept.',
-  // FIN63 from deleting: it was approved once, so its entries, and it, stay in the books.
+  // FIN68 from deleting: it was approved once, so its entries, and it, stay in the books.
   inBooks: 'This expense has been in the books, so it is kept. An owner or admin can reject it instead.',
   // Sending back: the reason box.
   reason: 'Say why the expense is sent back.',
@@ -236,14 +236,14 @@ const REJECT_REFUSALS: Record<string, string> = {
 };
 const SEND_BACK_REFUSALS: Record<string, string> = {
   FIN02: M.sendBackHasPayments,
-  FIN64: M.reason,
+  FIN69: M.reason,
   [FIN_SIGN_OFF]: M.sendBackNeedsDecider,
   [PG_CHECK]: M.tooLong,
   [PG_FORBIDDEN]: NOT_ALLOWED,
 };
 const DELETE_REFUSALS: Record<string, string> = {
   FIN01: M.cannotDelete,
-  FIN63: M.inBooks,
+  FIN68: M.inBooks,
   [PG_FOREIGN_KEY]: M.keptForPayment,
   [PG_FORBIDDEN]: NOT_ALLOWED,
 };
@@ -410,7 +410,7 @@ export async function sendBackExpense(
   return { ok: false, error: M.changed };
 }
 
-/** Deletes a pending or rejected expense. An approved one is refused (FIN01): it is rejected first. One that was ever approved is kept (FIN63). */
+/** Deletes a pending or rejected expense. An approved one is refused (FIN01): it is rejected first. One that was ever approved is kept (FIN68). */
 export async function deleteExpense(
   ctx: FinanceWriteContext,
   input: z.input<typeof expenseIdInput>,

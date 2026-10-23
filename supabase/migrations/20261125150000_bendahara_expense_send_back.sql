@@ -27,16 +27,16 @@
 --   * finance_send_back_expense(target_org, target_expense, seen_updated_at, reason):
 --     approved -> pending, with a reason. The expense's guard is restated to allow it
 --     for an owner or admin, with no payment against it, and only with a reason.
---   * An expense that has ever been in the books is no longer deleted (FIN63): its
+--   * An expense that has ever been in the books is no longer deleted (FIN68): its
 --     entries stay, so it does too. It is rejected instead.
 --   * finance_expense_totals gains sent_back_at and sent_back_reason (the latest
 --     send-back, while the expense is pending), at the end.
 --   * finance_ledger_lines: only the expense branch changes. It reads the approvals.
 --   * The audit trail logs a send-back and the rejection of an approved expense.
 --
--- Error codes: FIN63 and FIN64 are new (the highest before this file is FIN62).
---   FIN63  an expense that has been in the books is kept
---   FIN64  an expense is sent back with a reason
+-- Error codes: FIN68 and FIN69 are new (the highest before this file is FIN67).
+--   FIN68  an expense that has been in the books is kept
+--   FIN69  an expense is sent back with a reason
 
 -- Fail fast instead of queueing behind a long transaction and stalling sign-ins.
 set local lock_timeout = '5s';
@@ -69,7 +69,7 @@ create table public.finance_expense_approvals (
   constraint finance_expense_approvals_reversed_check
     check (num_nulls(reversed_on, reversed_at, reversed_as) in (0, 3)),
   constraint finance_expense_approvals_reversed_after_check check (reversed_on >= posted_on),
-  -- Cascade: an expense with approvals is never deleted (FIN63) but by its workspace's delete.
+  -- Cascade: an expense with approvals is never deleted (FIN68) but by its workspace's delete.
   foreign key (org_id, expense_id) references public.finance_expenses(org_id, id) on delete cascade,
   foreign key (org_id, category_id) references public.finance_categories(org_id, id)
 );
@@ -98,9 +98,9 @@ where e.status = 'approved';
 
 -- ---- the expense's guard, restated ------------------------------------------------------
 -- The body of 20261028100000 (its only definition), with three changes, each marked
--- "20261125130000": an expense that has been in the books is not deleted (FIN63); an
+-- "20261125150000": an expense that has been in the books is not deleted (FIN68); an
 -- approved expense goes back to pending when an owner or admin sends it back, as it
--- stands, with no payment against it and with a reason (FIN64); and the payment check
+-- stands, with no payment against it and with a reason (FIN69); and the payment check
 -- is shared by that and by rejecting an approved expense.
 create or replace function private.finance_expense_guard()
 returns trigger
@@ -114,10 +114,10 @@ begin
     if old.status = 'approved' and exists (select 1 from public.orgs where id = old.org_id) then
       raise exception 'an approved expense cannot be deleted' using errcode = 'FIN01';
     end if;
-    -- 20261125130000: its entries stay in the books, so it stays too. It is rejected instead.
+    -- 20261125150000: its entries stay in the books, so it stays too. It is rejected instead.
     if exists (select 1 from public.orgs where id = old.org_id)
        and exists (select 1 from public.finance_expense_approvals a where a.org_id = old.org_id and a.expense_id = old.id) then
-      raise exception 'an expense that has been in the books is kept' using errcode = 'FIN63';
+      raise exception 'an expense that has been in the books is kept' using errcode = 'FIN68';
     end if;
     return old;
   end if;
@@ -171,7 +171,7 @@ begin
     return new;
   end if;
 
-  -- 20261125130000: money out, paid or still to be paid, against it.
+  -- 20261125150000: money out, paid or still to be paid, against it.
   has_payments := exists (
     select 1
     from public.finance_allocations a
@@ -180,7 +180,7 @@ begin
       and t.status in ('draft','pending_approval','scheduled','posted')
   );
 
-  -- 20261125130000: sent back. An approved expense goes back to pending as it
+  -- 20261125150000: sent back. An approved expense goes back to pending as it
   -- stands, by an owner or admin, while no payment stands against it, and with a
   -- reason, which finance_send_back_expense passes in the transaction's
   -- openkuasa.expense_send_back_reason. A session with no signed-in user (a
@@ -198,7 +198,7 @@ begin
     end if;
     if auth.uid() is not null
        and coalesce(btrim(current_setting('openkuasa.expense_send_back_reason', true)), '') = '' then
-      raise exception 'an expense is sent back with a reason' using errcode = 'FIN64';
+      raise exception 'an expense is sent back with a reason' using errcode = 'FIN69';
     end if;
     new.approved_by := null;
     new.approved_at := null;
@@ -303,7 +303,7 @@ declare
   done uuid;
 begin
   if why is null then
-    raise exception 'an expense is sent back with a reason' using errcode = 'FIN64';
+    raise exception 'an expense is sent back with a reason' using errcode = 'FIN69';
   end if;
   perform set_config('openkuasa.expense_send_back_reason', why, true);
   update public.finance_expenses
@@ -391,7 +391,7 @@ grant select on public.finance_expense_totals to authenticated;
 
 -- ---- the ledger ---------------------------------------------------------------------
 -- finance_ledger_lines, replaced: main's current body as 20261123110000 (supplier
--- credit notes) left it, with only the expense branch changed (marked 20261125130000).
+-- credit notes) left it, with only the expense branch changed (marked 20261125150000).
 -- The same ten columns with the same types, so "create or replace" keeps the view and
 -- everything that reads it (finance_ledger_balances).
 create or replace view public.finance_ledger_lines with (security_invoker = true) as
@@ -687,7 +687,7 @@ from (
   union all
 
   -- ---- expense: each approval, and its reversal once it left the books --------------
-  -- 20261125130000: read from finance_expense_approvals, one row per approval as it was
+  -- 20261125150000: read from finance_expense_approvals, one row per approval as it was
   -- posted, so a reversal undoes what was posted, not what the expense says now. amount
   -- is what is to be paid, SST included, and all of it is the cost. It is owed on Accrued
   -- Expenses, not Accounts Payable; paying it is a payment out against it, above, which
@@ -906,7 +906,7 @@ grant select on public.finance_ledger_lines to authenticated;
 
 -- ---- the audit trail ----------------------------------------------------------------
 -- private.finance_expenses_audit, restated from 20261125120000 (its only definition),
--- with two more events (marked 20261125130000): an approved expense sent back, with its
+-- with two more events (marked 20261125150000): an approved expense sent back, with its
 -- reason, and an approved expense rejected. The trigger is unchanged.
 create or replace function private.finance_expenses_audit()
 returns trigger
@@ -935,7 +935,7 @@ begin
     r := new; what := 'Approved an expense'; ev := 'approved';
   elsif old.status = 'pending' and new.status = 'rejected' then
     r := new; what := 'Rejected an expense'; ev := 'rejected';
-  -- 20261125130000
+  -- 20261125150000
   elsif old.status = 'approved' and new.status = 'pending' then
     r := new; what := 'Sent back an expense'; ev := 'sent_back';
     why := nullif(btrim(current_setting('openkuasa.expense_send_back_reason', true)), '');

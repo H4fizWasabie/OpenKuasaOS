@@ -537,7 +537,7 @@ testWithSupabase('purchases side: bills by category, one payment for two bills, 
   ]);
 
   // A rejected expense produces nothing it did not undo: approved as the owner saved it, then rejected, its entry
-  // is reversed (20261125130000), and a scheduled payment produces nothing.
+  // is reversed (20261125150000), and a scheduled payment produces nothing.
   const refused = await o.c.rpc('finance_save_expense', {
     target_org: o.orgId,
     expense: { expense_date: today(), category_id: o.rent, vendor_name: 'Landlord', amount: 77 },
@@ -1043,8 +1043,8 @@ testWithSupabase('an expense sent back: what was posted is reversed today, the c
   expect(row).toMatchObject({ status: 'approved', sent_back_at: null, sent_back_reason: null });
 
   // Never without a reason: not through the function, not by a plain update.
-  expect((await sendBack(id, row.updated_at, '  ')).error?.code).toBe('FIN64');
-  expect((await o.c.from('finance_expenses').update({ status: 'pending' }).eq('id', id).select('id')).error?.code).toBe('FIN64');
+  expect((await sendBack(id, row.updated_at, '  ')).error?.code).toBe('FIN69');
+  expect((await o.c.from('finance_expenses').update({ status: 'pending' }).eq('id', id).select('id')).error?.code).toBe('FIN69');
   // Not as it was shown before a change: nothing matches.
   const stale = await sendBack(id, '2000-01-01T00:00:00Z', 'Wrong category');
   expect(stale.error, stale.error?.message).toBeNull();
@@ -1113,7 +1113,7 @@ testWithSupabase('an expense sent back: what was posted is reversed today, the c
   // It has been in the books, so it is not deleted, even once it is pending again.
   row = await shown(id);
   expect((await sendBack(id, row.updated_at, 'Duplicate')).error).toBeNull();
-  expect((await o.c.from('finance_expenses').delete().eq('id', id).select('id')).error?.code).toBe('FIN63');
+  expect((await o.c.from('finance_expenses').delete().eq('id', id).select('id')).error?.code).toBe('FIN68');
   await expectEntry(o, `expense:${id}:2:reverse`, [
     [purchases, 0, 80],
     [accrued, 80, 0],

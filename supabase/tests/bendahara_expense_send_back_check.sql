@@ -1,5 +1,5 @@
 -- Bendahara expense send-back check. Run it after
--- 20261125130000_bendahara_expense_send_back.sql, in the same transaction for a dry
+-- 20261125150000_bendahara_expense_send_back.sql, in the same transaction for a dry
 -- run, or by itself once the migration is applied. It proves that:
 --   * only an owner or admin sends back an approved expense, only with a reason, and
 --     not with a payment against it;
@@ -7,7 +7,7 @@
 --     under Utilities reverses RM 100 of Rent on the send-back day and posts RM 80 of
 --     Utilities on the new approval day, and the ledger balances;
 --   * rejecting an approved expense reverses its entry the same way;
---   * an expense that has been in the books is not deleted (FIN63), and deleting the
+--   * an expense that has been in the books is not deleted (FIN68), and deleting the
 --     workspace still takes everything with it.
 -- bendahara_cash_book_check.sql and bendahara_expense_rules_check.sql must still pass
 -- beside it. It leaves nothing behind either way: the block always ends with RAISE, so
@@ -86,9 +86,9 @@ begin
   select updated_at into seen from public.finance_expenses where id = ex;
 
   -- ==== refusals ==================================================================
-  fails := fails || public.bendahara_send_back_try('sent back with no reason', 'FIN64',
+  fails := fails || public.bendahara_send_back_try('sent back with no reason', 'FIN69',
     format('select public.finance_send_back_expense(%L, %L, %L, %L)', org, ex, seen, '  '));
-  fails := fails || public.bendahara_send_back_try('sent back by a plain update', 'FIN64',
+  fails := fails || public.bendahara_send_back_try('sent back by a plain update', 'FIN69',
     format('update public.finance_expenses set status = %L where id = %L', 'pending', ex));
   fails := fails || public.bendahara_send_back_try('sent back and changed in one update', 'FIN01',
     format('update public.finance_expenses set status = %L, amount = 1 where id = %L', 'pending', ex));
@@ -145,7 +145,7 @@ begin
    where source_id = ex2 and entry_key = 'expense:' || ex2 || ':reverse' and entry_date = greatest(current_date, my_today)
      and description = 'Rejected: Expense to Typo';
   if n <> 2 then fails := fails || format('a rejected approved expense has %s reversal lines, expected 2', n); end if;
-  fails := fails || public.bendahara_send_back_try('an expense that has been in the books is deleted', 'FIN63',
+  fails := fails || public.bendahara_send_back_try('an expense that has been in the books is deleted', 'FIN68',
     format('delete from public.finance_expenses where id = %L', ex2));
 
   -- Every entry of the workspace balances.

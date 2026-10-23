@@ -356,7 +356,7 @@ describe('sendBackExpense', () => {
   it('words each refusal', async () => {
     const cases: [string, string][] = [
       ['FIN02', 'This expense has a payment against it, paid or still to be paid, so it cannot be sent back.'],
-      ['FIN64', 'Say why the expense is sent back.'],
+      ['FIN69', 'Say why the expense is sent back.'],
       ['FIN14', 'Only an owner or admin can send back an expense. Ask one of them to do this.'],
       ['42501', 'You do not have permission to make changes here.'],
       ['XX000', 'That change could not be saved. Please try again.'],
@@ -386,7 +386,7 @@ describe('deleteExpense', () => {
       ok: false,
       error: 'This expense has a voided payment against it, so it is kept.',
     });
-    expect(await deleteExpense(refused('FIN63'), { id: EXPENSE })).toEqual({
+    expect(await deleteExpense(refused('FIN68'), { id: EXPENSE })).toEqual({
       ok: false,
       error: 'This expense has been in the books, so it is kept. An owner or admin can reject it instead.',
     });
