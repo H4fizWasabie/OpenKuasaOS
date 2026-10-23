@@ -25,6 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { BillOrderOption } from '@/lib/finance/bill-form';
+import { BASE_CURRENCY } from '@/lib/finance/currencies';
 import type { BillDetail, BillDisplayStatus, BillListRow } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { csvFileName } from '@/lib/finance/csv';
@@ -561,8 +562,10 @@ export function BillsView({
                         {(b.credited ?? 0) > 0 ? (
                           <span className="block text-xs text-muted-foreground">Credited {rm(b.credited ?? 0)}</span>
                         ) : null}
-                        {/* Credit the supplier gave on another bill that could go on this one. */}
-                        {(b.display_status === 'pending' || b.display_status === 'overdue') && (openCredit[b.supplier_id] ?? 0) > 0 ? (
+                        {/* Credit the supplier gave on another bill that could go on this one. Credit goes only on ringgit bills. */}
+                        {(b.display_status === 'pending' || b.display_status === 'overdue') &&
+                        b.currency === BASE_CURRENCY &&
+                        (openCredit[b.supplier_id] ?? 0) > 0 ? (
                           <span className="block text-xs text-muted-foreground">{rm(openCredit[b.supplier_id])} credit open from this supplier</span>
                         ) : null}
                       </TableCell>

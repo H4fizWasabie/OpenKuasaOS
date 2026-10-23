@@ -87,13 +87,15 @@ describe('the bills list', () => {
       bill('b', { bill_no: 'BILL-0002' }),
       bill('c', { bill_no: 'BILL-0003', display_status: 'paid', balance: 0, paid: 100 }),
       bill('d', { bill_no: 'BILL-0004', supplier_id: OTHER, supplier_name: 'Printhub' }),
+      // Credit goes only on ringgit bills, so a US-dollar bill from the same supplier says nothing of it.
+      bill('e', { bill_no: 'BILL-0005', currency: 'USD' }),
     ];
     const html = renderToStaticMarkup(
       <BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} openCredit={{ [SUPPLIER]: 150 }} />,
     );
     expect(html.match(/Credited RM/g)).toHaveLength(1);
     expect(html).toContain('Credited RM 30.00');
-    // On Lim Hardware's two bills that still owe; not on the paid one, not on another supplier's.
+    // On Lim Hardware's two ringgit bills that still owe; not on the paid one, the US-dollar one, or another supplier's.
     expect(html.match(/RM 150.00 credit open from this supplier/g)).toHaveLength(2);
   });
 });
